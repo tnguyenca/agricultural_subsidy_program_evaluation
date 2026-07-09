@@ -1,0 +1,1844 @@
+\documentclass[a4paper,12pt]{article}
+
+\usepackage{xcolor}
+\usepackage{graphicx}
+%\usepackage{subfig}
+\usepackage{hyperref}
+\usepackage{dsfont}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage[top=1.2in, bottom=1.2in, right=1.0in, left=1.0in]{geometry}
+\usepackage[backend=biber,style=authoryear]{biblatex}
+%\usepackage{cite}
+%\usepackage{titling}
+\usepackage{subcaption}
+\usepackage{float}
+%\usepackage[utf8]{inputenc}
+\usepackage{fourier} 
+\usepackage{array}
+\usepackage{makecell}
+\usepackage{bbm}
+\usepackage{dcolumn}
+\usepackage[toc,page]{appendix}
+\usepackage{setspace}
+% \usepackage{url}
+\doublespacing
+% \usepackage{fontspec}
+% \setmainfont{Helvetica}
+\usepackage{pdflscape}
+\usepackage{eurosym}
+
+\renewcommand\theadalign{cb}
+\renewcommand\theadfont{\bfseries}
+\renewcommand\theadgape{\Gape[4pt]}
+\renewcommand\cellgape{\Gape[4pt]}
+
+%% Options
+\setlength\parindent{0pt}
+\addbibresource{Memoire.bib}
+\newcommand\independent{\protect\mathpalette{\protect\independenT}{\perp}}
+
+%% Info
+% \title{Master Thesis \\ The ICHN program in France: Evaluation of Economic and Environmental Impacts}
+% \author{Student: Hung-Thuy Nguyen \\ Supervisor: Professor Sylvain Chab\'e-Ferret}
+% \date{\today}
+
+
+\begin{document}
+
+\begin{titlepage}
+	
+	% \newcommand{\HRule}{\rule{\linewidth}{0.5mm}} % Defines a new command for the horizontal lines, change thickness here
+	
+	\begin{center} % Center everything on the page
+		
+		\textsc{\LARGE TOULOUSE SCHOOL OF ECONOMICS}\\[1.5cm] % Name of your university/college
+		\textsc{\Large Master Thesis}\\[0.5cm] % Major heading such as course name
+		\textsc{\Large THE ICHN PROGRAM IN FRANCE: EVALUATION OF ECONOMIC AND ENVIRONMENTAL IMPACTS} \\[1cm] % Minor heading such as course title
+		\large Student: Hung-Thuy Nguyen \footnote{I would like to thank my supervisor and Lionel Vedrine (INRA Dijon) for their providing the data, and especially my supervisor for his constant guidance and support.} \\ [0.2cm]
+		\large Supervisor: Professor Sylvain Chab\'e-Ferret \\ [0.2cm]
+		{\large \today}\\ [0.5cm] % Date, change the \today to a set date if you want to be precise
+	\end{center}
+
+	% \rule{\textwidth}{1pt}
+	\begin{abstract}
+The ICHN program is an agricultural subsidy program in France designed to help alleviate disadvantages posed by natural adverse conditions, namely high altitude and high slope, on farms in mountain communes. This program is considered to be an important part of reinforcing the livelihood of those communes through the maintaining of agricultural activities, besides other objectives. The purpose of this study is to evaluate the economic and environmental effects of this program. In order to identify the treatment effects, I applied the Regression Discontinuity design and Difference-in-Difference on the data sample at commune level, available sparsely from 1955 to 2012. As a preliminary result, I have found that the ICHN scheme was effective in preventing the rapid decline in farming activities in those communes during the 1970s. At the same time, the decoupling of payment from livestock headage in 2000 led to detach of livestock density in program participants from the general descending trend.
+	\end{abstract}
+	%\rule{\textwidth}{1pt}
+	
+\end{titlepage}
+
+
+% \begin{titlepage}
+% \clearpage\maketitle
+% \thispagestyle{empty}
+% \end{titlepage}
+
+<<libraries,eval=TRUE,include=FALSE>>=
+library(MASS)
+library(RColorBrewer)
+library(stats)
+library(ggplot2)
+library(gplots)
+library(cowplot)
+library(snow)
+library(snowfall)
+library(xtable)
+library(sandwich)
+library(AER)
+library(plm)
+library(stargazer)
+library(reshape2)
+library(dplyr)
+library(gridExtra)
+#library(plotly)
+library(plot3D)
+####### Packages for maps
+library(ggmap)
+library(mapproj)
+# library(raster)
+#install.packages("tmap", dependencies = TRUE)
+#library(tmap)
+#install.packages("rdd")
+library(rdd)
+# install.packages("locfit")
+library(locfit)
+@
+
+
+<<data_reading,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+##### Read and combine different data sets
+
+# Data set 1 contains the dummies and several outcome measures for 1988, 2000 and 2010
+dataset1 <- read.csv(file="RDD_sylvain.csv", header = TRUE, sep = ";") # 36,574 obs
+dataset1 <- dataset1[is.na(dataset1$handicap_total)==FALSE & dataset1$classement_partiel==0, ]
+dataset1 <- as.data.frame(dataset1)
+
+
+# Choose variables which will be used later
+myvars <- c("dc","dpartement","commune","ZDS","ZM","ZMS","ZPie","ZPieS","massif","pente_moyenne","altitude_moyenne","handicap_pente","handicap_altitude","handicap_total","nb_farm2010","nb_farm2000","nb_farm1988","travail2010","travail2000","travail1988","sau2010","sau2000","sau1988","cheptel2010","cheptel2000","cheptel1988","montagne_dummy_1962","montagne_dummy_1974","montagne_dummy_1976","montagne_dummy_1978","montagne_dummy_1982","montagne_dummy_1985","montagne_dummy_1987","montagne_dummy_1990","montagne_dummy_2002","montagne_dummy_2005","montagne_dummy_2012","montagne_dummy_2015")
+
+dataset1 <- dataset1[,myvars]
+names(dataset1)[1] <- "code_insee"
+dataset1$code_insee <- as.character(dataset1$code_insee)
+
+
+# Data set 2 with outcome measures for 1970 and 1979
+dataset2 <- read.csv(file="panel_cleaned.csv")
+myvars <- c("panel_cleaned.id","panel_cleaned.time","panel_cleaned.numfarms","panel_cleaned.sau")
+dataset2 <- dataset2[,myvars]
+
+dataset2 <- reshape(dataset2, idvar = "panel_cleaned.id", timevar = "panel_cleaned.time", direction = "wide")
+dataset2 <- dataset2[,1:5]
+names(dataset2) <- c("code_insee","nb_farm1970","sau1970","nb_farm1979","sau1979")
+
+# Bring 'code_insee' to a common format
+test <- nchar(dataset2$code_insee)==4
+dataset2$code_insee[test] <- paste0(rep("0",sum(test)), dataset2$code_insee[test])
+
+# # Data set 3 with outcome measures for 1955. no information about "sau 1955"
+# dataset3 <- read.csv(file="Tractors.csv")
+# dataset3 <- dataset3[,c(2,3)]
+# names(dataset3) <- c("code_insee","nb_farm1955")
+# test <- nchar(dataset3$code_insee)==4
+# dataset3$code_insee[test] <- paste0(rep("0",sum(test)), dataset3$code_insee[test])
+
+
+
+# Data set 4 with oucome measures for 1955
+dataset4 <- read.csv(file="cross_f.csv")
+dataset4 <- dataset4[,c("cross_f.id","cross_f.sau_1955","cross_f.nbexpl_1955")]
+names(dataset4) <- c("code_insee","sau1955","nb_farm1955")
+
+# Bring 'code_insee' to a common format
+test <- nchar(dataset4$code_insee)==4
+dataset4$code_insee[test] <- paste0(rep("0",sum(test)), dataset4$code_insee[test])
+
+
+### Merge data sets together
+dataset_full <- merge(dataset1,merge(dataset2,dataset4,by="code_insee"),by="code_insee")
+
+dataset_full <- dataset_full[complete.cases(dataset_full),] # 27,928 obs
+
+rm(dataset2,dataset4)
+@
+
+
+%%%%%%%%%%%%%% Get data from server %%%%%%%%%%%%%%%
+<<server_SQL,eval=FALSE,echo=FALSE,results='hide'>>=
+library(RMySQL)
+## Remembrement Data Tables
+## ICHN Data Tables
+  
+conn <- dbConnect(MySQL(),group='Remembrement_amazon')
+table_list <- dbListTables(conn)
+
+remembrement1 <- dbReadTable(conn, table_list[1])
+remembrement2 <- dbReadTable(conn, table_list[2])
+remembrement3 <- dbReadTable(conn, table_list[3])
+remembrement4 <- dbReadTable(conn, table_list[4])
+remembrement5 <- dbReadTable(conn, table_list[5])
+remembrement6 <- dbReadTable(conn, table_list[6])
+remembrement7 <- dbReadTable(conn, table_list[7])
+remembrement8 <- dbReadTable(conn, table_list[8])
+remembrement9 <- dbReadTable(conn, table_list[9])
+remembrement10 <- dbReadTable(conn, table_list[10])
+remembrement11 <- dbReadTable(conn, table_list[11])
+remembrement12 <- dbReadTable(conn, table_list[12])
+
+remembrement <- list(remembrement1,remembrement2,remembrement3,remembrement4,remembrement5,remembrement6,remembrement7,remembrement8,remembrement9,remembrement10,remembrement11,remembrement12)
+names(remembrement) <- table_list
+
+for (i in 1:length(remembrement)){
+  write.csv(remembrement[i], file = paste0(names(remembrement)[i],".csv"))
+}
+dbDisconnect(conn)
+
+### ICHN_amazon is the data base for uploading the memoire data sets
+conn <- dbConnect(MySQL(),group='ICHN_amazon') #ICHN_amazon
+table_list <- dbListTables(conn)
+# Empty Database
+dbDisconnect(conn)
+@
+
+\newpage
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Keywords: Agriculture as a multifunctional activity; Rural development framework; Regional development convergence; Production effects; Environmental effects; Land sparing; Land sharing; Biodiversity conservation; Single Farm Payment; Common Agriculture Policy (CAP); Economic Geography;
+
+\section{Introduction}
+% What is LAF (general)?
+This paper is to evaluate the impacts of "Indemnit\'es compensatoires de handicaps naturels" (ICHN) or "Compensatory Allowances for Natural Handicaps" program on farms in mountain areas in France. ICHN is an agricultural subsidy program, undertaken in France within the framework of "Less Favored Areas" measure of the European Union. Under this program, farmers in regions which are subject to natural disadvantages for farming such as high altitudes are supported financially to continue their production. Even though it is a program inside the Common Agricultural Program (CAP), member states have certain flexibility in their choice and implementation to best suit the country's specific conditions. In France, there is the overlap of multiple subsidy schemes: regional rural development, agricultural subsidy, subsidy to specific sectors such as bovine milk, bovine meat production, etc. \\
+ICHN is one example of the long-used place-based policies in rural development. Such policies are often justified by a combination of social, cultural, economic and in some cases, environmental causes in considering agriculture as a multi-functional activity. Agriculture is no longer limited to supplying food, it is also entailed landscape, recreational activities and natural values (for the list of market and non-market goods and services provided by the countryside, see \cite{hall2004does}). Therefore, it is very challenging (and often not done) to have an overall quantitative assessment for those policies. Instead, we can have a look at each dimension of such a policy separately and ask whether it is the optimal measure in terms of economic and environmental performances. \\
+% Possible effects from a subsidy program.
+% Where does this program stand in a bigger picture?
+% Economic Integration discussion by the 3 reports
+Economically, this subsidy scheme sets to achieve convergence in economic development between regions in a country. The rationales are  the unused growth potentials, as said in \cite{oecd2009regions}: "Opportunities for growth exist in all types of regions across the entire territory." Accordingly, if assets are mobilized and investments are made in an efficient manner, each and every region can achieve sustainable prosperity. Similarly, \cite{barca2009agenda} advocates a place-based development approach with the objective of reducing persistent inefficiency and social exclusion by the provisions of public goods in certain locations. It represents an over-optimistic view that place-based policies can bring about benefits and opportunities to every single European citizen, "irrespective of where he/she lives." However, there is also a totally different point of view. As specified in the World Development Report (\cite{scott2009world}), economic convergence is not the best objective and efficient use of capital until a certain level of development (efficiency-equity trade-off), even assuming that regional development policies work as intended. Citing the case of Ireland, this report promotes the acknowledgment of unbalanced regional progress and hence, encourages policies aiming at economic integration instead. For France, \cite{talandier2016two} also documents that the wealth of towns depends on "its integration into a network of towns" during 1968-1990 period as the interconnection helps towns overcome their resource constraints as well as encourages them to innovate and  compete with neighboring towns. Together with this integration, the rise of local production drove the economic growth for the country in this period. For rural areas, integration implies the investment in institution and infrastructure to realize the interconnection, the access to a common market. \\
+% But what does economic integration mean for rural areas in general and agriculture in particular? \textbf{institution, infrastructure, eg: farmers' co-operatives} \\
+% 
+In fact, the multi-functionality of agriculture is also the critical assumption for Europe to continue these domestic farm support programs during WTO negotiations. According to \cite{potter2002agricultural}, this assumption is a valid policy concept and unique for Europe. Therefore, there is a need to retain certain elements of those programs to protect the environment from adverse influences of intensive farming. However, the design of domestic subsidy mechanisms has to change to be less trade-distorting. Following this logic, the subsidy is not to increase the competitiveness of agriculture sector in the global market, but to compensate farmers for providing public goods (\cite{potter2004multifunctionality}). In other words, environmental benefits has become the objective instead of a side effect of those subsidies. Again, this argument relies on the presumption that farming is indispensable and that farmers assume the responsibility to conserve the landscape and the environment through their farming activities. \\
+There is an on-going controversial debate concerning land sharing versus land sparing as alternative land uses in order to solve the trade-off between agricultural production and biodiversity conservation. Land sharing integrates agricultural production and biodiversity preservation within the same terrain, resulting in a more heterogeneous landscapes (\cite{fischer2008should}). Accordingly, farming has to be modified to accomodate biodiversity within the same land, even though "there are few alternative management regimes which can mimic the conservation benefits of grazing, mowing, burning or harvesting in the absence of farming" (\cite{potter2002agricultural}). In contrast, land sparing focuses production with maximum yield in one portion to meet food demand and spare the rest specifically for biodiversity. These two alternatives are backed up by different scientific grounds and require different public policies (\cite{fischer2008should}). Together, they create a spectrum of land use between these two extreme forms. \\
+In practice, the choice between these two alternatives is dictated by biophysical and also socioeconomic charateristics of a given region as well as consumers' preferences (\cite{fischer2008should}). For example, land sparing is more likely to be feasible in plateau where large-scale and high-yield production is made easy with the utilization of machinery whereas for moutain areas, land sharing might be a more likely  solution. Empirical studies also find mixed results, depending on the context, the measurement and sometimes the definition of land sharing and land sparing. The most common indicators of biodiversity are species richness or persistence and population density. For instance, \cite{egan2012comparison} examines an area of 100 squared kilometers in Pennsylvania, USA and finds that land sharing is more beneficial in landscapes with few non-crop habitat while for more complex landscapes, land sharing is recommended. In addition, the most important factors deciding which solution is better are identified as landscape scale, landscape proposition and the target yield because species have different levels of sensitivity to agricultural yield (\cite{green2005farming}) (For a list of studies supporting land sharing or land sparing, see \cite{kremen2015reframing}). It means that along with socioeconomic constraints (\cite{grau2013beyond}), the biodiversity structure calls for a local instead of universal solution. For communes in ICHN program, land sharing seems to be the relevant answer given their geographical traits. However, a more comprehensive study incorporating other factors is needed to have an informed judgement.
+% Species population outcomes are partly related to factors outside the individual farmers' control such as the weather and the management of other land.
+% Transparency in monitoring outcomes if environmental objectives are measured. 
+
+\subsection*{Why is the research question important?}
+%
+Despite its long existence, there has been only the interim evaluation report by \cite{interim2003ichn} which employed the survey approach. In other words, it focuses more on qualitative measures than quantitative. This paper aims at supplementing that with natural experiment identification strategies to establish a robust evidence for the effectiveness of the program. The outcomes that I choose to look at are the number of farms (NoF), the total usable farm land (UFL) in a commune as well as the density of livestock for the period from 2000 onwards. To justify, the number of farms reflects structural changes in agriculture sector in those mountain areas in contrast with other areas in the control group. Such an insight can have important implications for future reforms of the program. For instance, if we observe higher rate of consolidation in mountain areas, then the limit and rate of support can be adjusted correspondingly. The usable farm land is most directly related to the objectives of the program and hence, deserves attention. Finally, the livestock density is to evaluate if the inclusion of new environmental indicators actually promotes environmental friendly farming practice.
+% Further policy implications? \\
+% \section{Literature Review and any related economic theory}
+
+\section{Program Description and key figures}
+
+%
+% <<Understand_ichn,eval=FALSE,echo=FALSE,results='hide'>>=
+% altitude_lm <- lm(handicap_altitude ~ altitude_moyenne, data = dataset1)
+% summary(altitude_lm)
+% altitude_lm$coefficients[[1]] + altitude_lm$coefficients[[2]]*600
+% pente_lm <- lm(handicap_pente ~ pente_moyenne, data = dataset1)
+% summary(pente_lm)
+% pente_lm$coefficients[[1]] + pente_lm$coefficients[[2]]*20
+% 
+% lm2 <- lm(handicap_total ~ altitude_moyenne + pente_moyenne, data=dataset1)
+% summary(lm2)
+% @
+%
+
+The ICHN program was created in 1973 and implemented in France since 1975 as a continuation of a rural development investment program that had existed in 1960s. It is in 1961 when the first zoning and eligibility of communes were determined. \\
+To set the context for the rural development program in the 1960s, \cite{talandier2016two} shows that the period from 1954-1968 is characterized by the workforce shift from industry and agriculture to services due to differentials in wages, resulting in a migration wave away from rural areas. The next period of 1968-1990 saw a re-balancing of population between rural communes and urban centers, except for remote rural areas. Those communes were still experiencing the depopulation trend. "This period saw the economic and demographic balance between regions restored, but not between town and country" (\cite{talandier2016two}). \\
+The program's objectives as explicitely listed out by the European Union and French government include: 
+\begin{enumerate}
+  \item Maintain rural communities by providing quality life to farmers
+  \item Ensure a diversified supply of quality agriculture products to French citizens
+  \item Preserve natural landscape and biodiversity
+  \item Promote sustainable farming practice
+\end{enumerate}
+%
+Below is some key information about the program in 2000 (\cite{interim2003ichn}):
+\begin{itemize}
+  \item Number of beneficiaries: 110,000.
+  \item Annual costs: 410 million euros.
+  \item Area covered: 5.7 million hectares or 53 hectares per farm on average.
+  \item Allowance per hectare per farm: 95 euros per hectare or 3,800 euros per farm. It fluctuates from the minimum amount of 33 euros/ha to the maximum amount of 178 euros per hectare.
+  \item Average livestock density: 0.94 LSU/ha with the total number of 6.1 million LSU.
+\end{itemize}
+%
+Throughout the history of ICHN, there have been several categories of zone defined and added:
+\begin{enumerate}
+  \item ZM: moutain area (zone montagne)
+  \item ZHM: high moutain area (zone haute montagne)
+  \item ZDS: simple disadvantaged area (zones d\'efavoris\'e simple)
+  \item ZPie: piedmont area (zone Pi\'emont)
+\end{enumerate}
+%
+ICHN is applicable for both mountain zones and other disadvantaged zones as listed above. While geographical criteria are used to establish mountain and high moutain zones' eligibility, for others, it is socio-economic and demographic indicators. \textbf{This data sample contains only communes in mountain zone}, therefore, I pay attention only to this type of zones. \\
+In official documents issued by French authorities, to be classified as a mountain or high mountain zone in Metropolitan France, a commune has to satisfy at least one of the two following criteria:
+\begin{enumerate}
+  \item The average communal altitude is at least 600 meters in Vosges, 700 in other massifs and 800 in Mediterranean coast.
+%, which translates into a Altitude Handicap Index (AHI) of 2.956. (see Note \footnote{Regression yields the following formula for AHI: $AHI = -1.2222 + 0.00696 * \text{ Altitude (in m)}$.})
+  \item The average slope of communal land is at least 20\%.
+%, which translates into a Slope Handicap Index (SHI) of around 2.056. (see Note \footnote{Regression yields the following formula for SHI: $SHI = -0.9076 + 0.1482 * \text{ Slope(in \%)}$.})
+\end{enumerate}
+Furthermore, communes which do not strictly satisfy one of two conditions above separately but are deemed to have the same level of difficulties in farming due to the combination of altitude and slope (for France, it is to have minimum altitude of 500 meters and average slope of 15\%) are also eligible for subsidy. Besides, farmers have to satisfy additional requirements such as possessing at least 3 hectares of agricultural land or having at least 3 livestock units. These additional requirements can change in each stage of the program. \\
+In practice, the computation of Altitude Handicap Index (AHI) and Slope Handicap Index (SHI) is done by a computer software of French National Research Institute of Science and Technology for Environment and Agriculture. The principle is to divide communal surface into Lambert grid with cells of 1 hectare each (100 meters by 100 meters). Then, the altitude and slope of each cell is calculated and classified into 14 levels for altitude and 7 for slope. For each level, there exists a pre-determined coefficient, denoted "NP" and "NA" in the last columns of figure \ref{fig:hpa}. Additionally, the computation also takes into account the expected decrease in usable farm land when the altitude and slope rise, which is presented by the "DP" and "DA" coefficients in the same figure \ref{fig:hpa}. The formulas for AHI and SHI are as follow, with $S_{i}$ is the number of grid cells falling into level i:
+$$AHI = \frac{\sum_{i=0}^{13} NA_{i}*S_{i}}{\sum_{i=0}^{13} DA_{i}*S_{i}}$$
+$$SHI = \frac{\sum_{i=1}^{7} NP_{i}*S_{i}}{\sum_{i=1}^{7} DP_{i}*S_{i}}$$
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[scale=0.75]{hpa.png}
+  \caption{Coefficients for Altitude and Slope Handicap Indices}
+  \label{fig:hpa}
+\end{figure}
+The Natural Handicap Index (NHI) is the sum of AHI and SHI. Communes with NHI equal or greater than 2.0 are classified as mountain zones, with exception to communes having NHI between 1.8 and 2.0 but enclaved by eligible communes. \\
+Some important changes to the program worth mentioning are the change in the basis for allowance calculation and the inclusion of sustainable farming practice as a criterion for eligibility in 2000. These changes took effect starting from 2001. Before that, payment was directly linked with the number of livestock, a mechanism known as coupled payment. Since 2000, in order to conform with the regulations of Wolrd Trade Organization (WTO), payment is now a function of farming land (decoupled payment) and farmers can receive support for up to 50 hectares. \\
+Whether coupled or decoupled, those programs cause distortions in farmers' production. Decoupled payment schemes are claimed to have no impact on production level decisions for risk-neutral farmers. Nevertheless, for risk-averse producers in settings with uncertainties such as price and yield fluctuations, they do raise optimal production decisions through the income-stabilizing and insurance effects. For coupled programs, the effect is driven even higher with the additional coupling effect which is also the most important one (\cite{hennessy1998production}). In other words, "decoupled" programs are not really decoupled (\cite{hennessy1998production}, \cite{beard2001decoupled}). Given that fact, these reforms are expected to induce a more environment friendly farming method. Whether it is the case is studied in section \ref{sec:environment}.  \\
+% Differences between coupled and decoupled payments and how we expect farmers to react?} + cross-compliance \\
+% In the evaluation report by CNASEA (2003), they claim that the ICHN program works in mountain areas but not in zones with "simple" handicaps. They also say that it is often difficult to establish a link between the effectiveness of the program and some quantitative indicators.\\
+This program has undergone various changes and reforms. Unfortunately, I do not have full information about the average subsidy amount and how this amount was shared between the communal government and farmers in each different stage of the program. The evaluation below thus sees the program effects as the average difference between  participants and non-participants, regardless of the actual allowance they received. \\
+The rest of the paper is organized as follow: Section \ref{sec:data} presents the data available. In section \ref{sec:econometrics}, two identification strategies, namely Regression Discontinuity design and Difference-in-Difference are used to estimate the treatment effect in terms of maintaining farming activities while section \ref{sec:environment} looks at the changes in livestock density following major changes of the program in 2000. Section \ref{sec:conclude} concludes the paper with possible extensions to the current analysis to lend more insights into the program.
+%
+
+\section{Data} \label{sec:data}
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Data Manipulation %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+<<data_communes_map,eval=FALSE,echo=FALSE,results='hide'>>=
+### Geographical data
+dataset_geo <- read.csv(file="villes_france.csv", header = TRUE, sep = ",", encoding="UTF-8", stringsAsFactors=FALSE)
+dataset_geo <- as.data.frame(dataset_geo)
+dataset_geo <- dataset_geo[,c("codes_postaux","code_insee","longitude","latitude")]
+
+test <- nchar(dataset_geo$code_insee)==4
+dataset_geo$code_insee[test] <- paste0(rep("0",sum(test)),dataset_geo$code_insee[test])
+
+## Merge two data sets to have the latitude and longitude vars
+dataset_map <- merge(dataset1, dataset_geo, by="code_insee")
+dataset_map <- as.data.frame(dataset_map)
+
+france <- getData('GADM', country='FRA', level=5) ##Get the Communes Shapefile for France
+new_status <- cbind(toupper(dataset_map$dpartement),toupper(dataset_map$commune), dataset_map$montagne_dummy_1962,(dataset_map$montagne_dummy_1978-dataset_map$montagne_dummy_1962),(dataset_map$montagne_dummy_2015-dataset_map$montagne_dummy_1978))
+new_status <- as.data.frame(new_status)
+names(new_status) <- c("NAME_2","NAME_5","sixties","seventies","after_eighties")
+
+color_vec <- c(4,5,6,8)
+names_vec <- c("1960s", "1970s","1980s onwards","Non-participating")
+new_status$col_code <- ifelse(new_status$sixties==1,color_vec[1],ifelse(new_status$seventies==1,color_vec[2],ifelse(new_status$after_eighties==1,color_vec[3],color_vec[4])))
+new_status$status_year <- ifelse(new_status$sixties==1,names_vec[1],ifelse(new_status$seventies==1,names_vec[2],ifelse(new_status$after_eighties==1,names_vec[3],names_vec[4])))
+
+france$NAME_2 <- toupper(france$NAME_2)
+france$NAME_5 <- toupper(france$NAME_5)
+france <- merge(france,new_status,by=c("NAME_2","NAME_5"))
+
+# There are communes in the france_map shapefile with no match in the dataset 'total'
+france$col_code[is.na(france$col_code)] <- color_vec[4]
+
+png("map_communes.png", width = 2560, height = 2560)
+plot(france, col=france$col_code)
+legend("topright", legend=levels(as.factor(france$status_year)), pch=19, col=levels(as.factor(france$col_code)), title = "Participating communes over time", cex = 4)
+dev.off()
+rm(dataset1)
+@
+%
+<<first_plot,eval=TRUE,echo=FALSE,results="hide">>=
+# Plot the number of treated communes each year
+treated <- as.data.frame(matrix(0, ncol = 2, nrow = 12))
+names(treated) <- c("Year","nb_communes")
+treated[1,2] <- sum(dataset_full$montagne_dummy_1962)
+treated[2,2] <- sum(dataset_full$montagne_dummy_1974)
+treated[3,2] <- sum(dataset_full$montagne_dummy_1976)
+treated[4,2] <- sum(dataset_full$montagne_dummy_1978)
+treated[5,2] <- sum(dataset_full$montagne_dummy_1982)
+treated[6,2] <- sum(dataset_full$montagne_dummy_1985)
+treated[7,2] <- sum(dataset_full$montagne_dummy_1987)
+treated[8,2] <- sum(dataset_full$montagne_dummy_1990)
+treated[9,2] <- sum(dataset_full$montagne_dummy_2002)
+treated[10,2] <- sum(dataset_full$montagne_dummy_2005)
+treated[11,2] <- sum(dataset_full$montagne_dummy_2012)
+treated[12,2] <- sum(dataset_full$montagne_dummy_2015)
+treated$Year <- c("1962","1974","1976","1978","1982","1985","1987","1990","2002","2005","2012","2015")
+@
+%
+<<nb_communes,eval=TRUE,echo=FALSE,results='hide',fig.cap='Number of participating communes over time',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+par(mar=c(5.1,5.6,4.1,2.1))
+ggplot(data = treated, aes(x=as.factor(Year), y=nb_communes, group=1, label=nb_communes)) + geom_line(col="blue") + geom_point(col="red", pch=16) + xlab("Year") + ylab("Number of communes") + geom_text(aes(label=nb_communes),hjust=0, vjust=0)
+@
+%
+The original dataset has roughly 36,000 observations at French commune level. It contains the outcome variables, namely number of farms, usable farm land area in hectares, livestock measure in 1988, 2000 and 2010, and the communes' participation status for several years since 1962. The second dataset consists of data for earlier period from 1955 to 1979. The final data used for this paper is the synthesis of the two and it has 27,928 observations, all in mainland France. Table \ref{tab:summary} shows the summary statistics, and as we can see, there is a clear decline trend in outcome variables both in treatment and control groups. Another remark is very high standard deviations, indicating the large dispersion of these measures. These outcomes resemble log-normal distribution, favoring the natural logarithm form analysis. \\
+Figure \ref{fig:nb_communes} shows the changes in the number of participants over time. It is easy to see the sharp increase in the 1970s, from 3,122 communes in 1974 to 3,947 in 1978. After that, there were very few communes added. Figure \ref{fig:commune_map} shows the geographical positions of those participating communes. The status for each decade is based on the latest year of that decade for which the data is available. Note that once a commune has obtained the status, there is no reapplication requirement. It is clear that participating communes are clustered around 4 main regions due to geographical characteristics.
+% Summary statistics & comments
+<<summary_statistics,eval=FALSE,echo=FALSE,results='hide',cache=TRUE>>=
+### Summary statistics for dataset_full
+summ <- matrix(NA, ncol = 5, nrow = 16)
+rownames(summ) <- c("Total",rep(c("Treatment group","Control group","Total"),5))
+colnames(summ) <- c("Obs","No. of farms","No. of farms - SE","Usable Land","Usable Land - SE")
+
+## 1955
+summ[1,1] <- length(dataset_full$montagne_dummy_1974)
+summ[1,2] <- round(mean(dataset_full$nb_farm1955),2)
+summ[1,3] <- round(sd(dataset_full$nb_farm1955),2)
+summ[1,4] <- round(mean(dataset_full$sau1955),2)
+summ[1,5] <- round(sd(dataset_full$sau1955),2)
+## 1970
+summ[2,1] <- sum(dataset_full$montagne_dummy_1974==1)
+summ[3,1] <- sum(dataset_full$montagne_dummy_1974==0)
+summ[4,1] <- length(dataset_full$montagne_dummy_1974)
+summ[2,2] <- round(mean(dataset_full$nb_farm1970[dataset_full$montagne_dummy_1974==1]),2)
+summ[3,2] <- round(mean(dataset_full$nb_farm1970[dataset_full$montagne_dummy_1974==0]),2)
+summ[4,2] <- round(mean(dataset_full$nb_farm1970),2)
+summ[2,3] <- round(sd(dataset_full$nb_farm1970[dataset_full$montagne_dummy_1974==1]),2) # 36.24
+summ[3,3] <- round(sd(dataset_full$nb_farm1970[dataset_full$montagne_dummy_1974==0]),2) # 52.72
+summ[4,3] <- round(sd(dataset_full$nb_farm1970),2) # 51.15
+summ[2,4] <- round(mean(dataset_full$sau1970[dataset_full$montagne_dummy_1974==1]),2)
+summ[3,4] <- round(mean(dataset_full$sau1970[dataset_full$montagne_dummy_1974==0]),2)
+summ[4,4] <- round(mean(dataset_full$sau1970),2)
+summ[2,5] <- round(sd(dataset_full$sau1970[dataset_full$montagne_dummy_1974==1]),2) # 816.57
+summ[3,5] <- round(sd(dataset_full$sau1970[dataset_full$montagne_dummy_1974==0]),2) # 789.67
+summ[4,5] <- round(sd(dataset_full$sau1970),2) # 793.09
+## 1979
+summ[5,1] <- sum(dataset_full$montagne_dummy_1978==1)
+summ[6,1] <- sum(dataset_full$montagne_dummy_1978==0)
+summ[7,1] <- length(dataset_full$montagne_dummy_1978)
+summ[5,2] <- round(mean(dataset_full$nb_farm1979[dataset_full$montagne_dummy_1978==1]),2)
+summ[6,2] <- round(mean(dataset_full$nb_farm1979[dataset_full$montagne_dummy_1978==0]),2)
+summ[7,2] <- round(mean(dataset_full$nb_farm1979),2)
+summ[5,3] <- round(sd(dataset_full$nb_farm1979[dataset_full$montagne_dummy_1978==1]),2) 
+summ[6,3] <- round(sd(dataset_full$nb_farm1979[dataset_full$montagne_dummy_1978==0]),2)
+summ[7,3] <- round(sd(dataset_full$nb_farm1979),2) 
+summ[5,4] <- round(mean(dataset_full$sau1979[dataset_full$montagne_dummy_1978==1]),2)
+summ[6,4] <- round(mean(dataset_full$sau1979[dataset_full$montagne_dummy_1978==0]),2)
+summ[7,4] <- round(mean(dataset_full$sau1979),2)
+summ[5,5] <- round(sd(dataset_full$sau1979[dataset_full$montagne_dummy_1978==1]),2) 
+summ[6,5] <- round(sd(dataset_full$sau1979[dataset_full$montagne_dummy_1978==0]),2) 
+summ[7,5] <- round(sd(dataset_full$sau1979),2) 
+## 1988
+summ[8,1] <- sum(dataset_full$montagne_dummy_1987==1)
+summ[9,1] <- sum(dataset_full$montagne_dummy_1987==0)
+summ[10,1] <- length(dataset_full$montagne_dummy_1987)
+summ[8,2] <- round(mean(dataset_full$nb_farm1988[dataset_full$montagne_dummy_1987==1]),2)
+summ[9,2] <- round(mean(dataset_full$nb_farm1988[dataset_full$montagne_dummy_1987==0]),2)
+summ[10,2] <- round(mean(dataset_full$nb_farm1988),2)
+summ[8,3] <- round(sd(dataset_full$nb_farm1988[dataset_full$montagne_dummy_1987==1]),2) 
+summ[9,3] <- round(sd(dataset_full$nb_farm1988[dataset_full$montagne_dummy_1987==0]),2)
+summ[10,3] <- round(sd(dataset_full$nb_farm1988),2) 
+summ[8,4] <- round(mean(dataset_full$sau1988[dataset_full$montagne_dummy_1987==1]),2)
+summ[9,4] <- round(mean(dataset_full$sau1988[dataset_full$montagne_dummy_1987==0]),2)
+summ[10,4] <- round(mean(dataset_full$sau1988),2)
+summ[8,5] <- round(sd(dataset_full$sau1988[dataset_full$montagne_dummy_1987==1]),2) 
+summ[9,5] <- round(sd(dataset_full$sau1988[dataset_full$montagne_dummy_1987==0]),2) 
+summ[10,5] <- round(sd(dataset_full$sau1988),2) 
+# 2000
+summ[11,1] <- sum(dataset_full$montagne_dummy_2002==1)
+summ[12,1] <- sum(dataset_full$montagne_dummy_2002==0)
+summ[13,1] <- length(dataset_full$montagne_dummy_2002)
+summ[11,2] <- round(mean(dataset_full$nb_farm2000[dataset_full$montagne_dummy_2002==1]),2)
+summ[12,2] <- round(mean(dataset_full$nb_farm2000[dataset_full$montagne_dummy_2002==0]),2)
+summ[13,2] <- round(mean(dataset_full$nb_farm2000),2)
+summ[11,3] <- round(sd(dataset_full$nb_farm2000[dataset_full$montagne_dummy_2002==1]),2) 
+summ[12,3] <- round(sd(dataset_full$nb_farm2000[dataset_full$montagne_dummy_2002==0]),2)
+summ[13,3] <- round(sd(dataset_full$nb_farm2000),2) 
+summ[11,4] <- round(mean(dataset_full$sau2000[dataset_full$montagne_dummy_2002==1]),2)
+summ[12,4] <- round(mean(dataset_full$sau2000[dataset_full$montagne_dummy_2002==0]),2)
+summ[13,4] <- round(mean(dataset_full$sau2000),2)
+summ[11,5] <- round(sd(dataset_full$sau2000[dataset_full$montagne_dummy_2002==1]),2) 
+summ[12,5] <- round(sd(dataset_full$sau2000[dataset_full$montagne_dummy_2002==0]),2) 
+summ[13,5] <- round(sd(dataset_full$sau2000),2)
+# 2010
+summ[14,1] <- sum(dataset_full$montagne_dummy_2012==1)
+summ[15,1] <- sum(dataset_full$montagne_dummy_2012==0)
+summ[16,1] <- length(dataset_full$montagne_dummy_2012)
+summ[14,2] <- round(mean(dataset_full$nb_farm2010[dataset_full$montagne_dummy_2012==1]),2)
+summ[15,2] <- round(mean(dataset_full$nb_farm2010[dataset_full$montagne_dummy_2012==0]),2)
+summ[16,2] <- round(mean(dataset_full$nb_farm2010),2)
+summ[14,3] <- round(sd(dataset_full$nb_farm2010[dataset_full$montagne_dummy_2012==1]),2) 
+summ[15,3] <- round(sd(dataset_full$nb_farm2010[dataset_full$montagne_dummy_2012==0]),2)
+summ[16,3] <- round(sd(dataset_full$nb_farm2010),2) 
+summ[14,4] <- round(mean(dataset_full$sau2010[dataset_full$montagne_dummy_2012==1]),2)
+summ[15,4] <- round(mean(dataset_full$sau2010[dataset_full$montagne_dummy_2012==0]),2)
+summ[16,4] <- round(mean(dataset_full$sau2010),2)
+summ[14,5] <- round(sd(dataset_full$sau2010[dataset_full$montagne_dummy_2012==1]),2) 
+summ[15,5] <- round(sd(dataset_full$sau2010[dataset_full$montagne_dummy_2012==0]),2) 
+summ[16,5] <- round(sd(dataset_full$sau2010),2) 
+
+# xtable(summ)
+@
+%\clearpage
+\begin{table}[!htbp]
+\captionof{table}{Data Summary} \label{tab:summary}
+\centering
+\resizebox{\columnwidth}{!}{%
+\bgroup
+\def\arraystretch{1.5}
+\begin{tabular}{|c|ccccc|}
+  \hline
+ & Obs & Number of farms & \makecell{Number of farms \\ (Standard Error)} & Usable Farm Land & \makecell{Usable Farm Land \\ (Standard Error)} \\ 
+  \hline
+  & \multicolumn{5}{c|}{\textbf{1955}} \\
+  Total & 27,928 & 71.44 & 78.37 & 1013.66 & 931.73 \\
+  & \multicolumn{5}{c|}{\textbf{1970}} \\
+  Treatment group & 3,122 & 45.23 & 36.30 & 841.83 & 817.37 \\ 
+  Control group & 24,806 & 48.05 & 52.73 & 919.93 & 789.60 \\ 
+  Total & 27,928 & 47.74 & 51.16 & 911.20 & 793.12 \\
+  & \multicolumn{5}{c|}{\textbf{1979}} \\
+  Treatment group & 3,947 & 36.02 & 30.74 & 808.93 & 787.43 \\ 
+  Control group & 23,981 & 38.41 & 41.92 & 916.69 & 786.70 \\ 
+  Total & 27,928 & 38.08 & 40.53 & 901.46 & 787.68 \\
+  & \multicolumn{5}{c|}{\textbf{1988}} \\
+  Treatment group & 3,961 & 28.36 & 25.01 & 780.67 & 784.78 \\ 
+  Control group & 23,967 & 31.11 & 33.48 & 887.94 & 761.14 \\ 
+  Total & 27,928 & 30.72 & 32.43 & 872.72 & 765.43 \\
+  & \multicolumn{5}{c|}{\textbf{2000}} \\
+  Treatment group & 3,964 & 19.23 & 18.04 & 778.20 & 798.99 \\ 
+  Control group & 23,964 & 20.13 & 21.32 & 860.98 & 756.99 \\ 
+  Total & 27,928 & 20.00 & 20.89 & 849.23 & 763.62  \\ 
+  & \multicolumn{5}{c|}{\textbf{2012}} \\
+  Treatment group & 3,972 & 14.89 & 14.35 & 744.13 & 790.28 \\ 
+  Control group & 23,956 & 14.74 & 15.70 & 836.83 & 754.20 \\ 
+  Total & 27,928 & 14.76 & 15.52 & 823.65 & 760.11 \\
+  \hline
+\end{tabular}
+\egroup
+}
+\end{table}
+%
+\clearpage
+\begin{figure}[!htbp]
+	\centering
+	\includegraphics[width=.8\linewidth]{map_communes.png}
+	\caption{Map of participating communes in different decades}
+	\label{fig:commune_map}
+\end{figure}
+\section{Econometric Models and Results} \label{sec:econometrics}
+%
+In this section, the treatment effect is estimated using 2 approaches, first by Regression Discontinuity (RD) design (Subsection \ref{subsec:rdd}) with cutoff 2.0 and then by Difference-in-Difference (DID) method (Subsection \ref{subsec:did}). \\
+% \textbf{Main results here} \\
+The RD design is estimated using several different specifications. Only the approach using polynomial of order 1 and 2 leads to significant results but in opposite directions while all non-parametric approaches struggle to establish the link between program participation and the outcome measures mentioned above \footnote{The RD design with cutoff 1.8 is implemented in Appendix \ref{app:rdd18} and it leads to the same conclusion.}. One viable explanation is the inconsistencies in the implementation of the program, leading it to become a fuzzy design while it should have been a sharp RD design. In contrast, the DID method indicates that the program has positive effects in the sense that it slowed down the declination in agricultural activities in treated communes compared to the control group. \textbf{Absent the program, mountain communes witnessed a decrease of 14.6\% (0.91\% annually) in number of farms and 31.2\% (1.83\% annually) in usable farm land more than their control counterparts during the period from 1955 to 1970. From 1970 to 1979, the program helped narrow the gap to only 1.7\% for number of farms. For usable farm land, mountain communes even saw a decrease of 1.3\% less than control group over the same period.}
+%
+\subsection{Regression Discontinuity design} \label{subsec:rdd}
+%
+<<hist_nhi,eval=TRUE,echo=FALSE,results='hide',fig.cap='NHI of eligible communes in 1962',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# All treated communes in this sample is zone montagne
+# 1962: 243 communes in zone montagne seche; 3790 communes in normal zone montagne
+hist(dataset_full$handicap_total[dataset_full$montagne_dummy_1962==1], breaks = 100,xlim=c(0,5), xlab="NHI", main = "")
+abline(v=2.0,col="red")
+@
+%
+% It is noted in the interim evaluation report (\cite{interim2003ichn}) that the initial threshold for eligibility for \textbf{Natural Handicap Index} (sum of AHI and SHI) is 3.0
+As mentioned above, the threshold for eligibility is having NHI greater or equal to 2.0. However, examination of eligible communes in 1962 in figure \ref{fig:hist_nhi} (eligibility information in 1961 has a lot of missing values) reveals that the likely cutoff value is much smaller than 2.0 (If using outcome and treatment assignment data in 1970, the cutoff is estimated at 1.0 for number of farms or 1.2 for usable farm land, see Appendix \ref{app:cutoff_estimation}). It means that there are some inconsistencies between the program rules and the actual implementation. Despite that fact, I will still implement the RDD with cutoff 2.0 with different methods, each accompanied with a placebo test using data of 1955. \\
+Before going into details, it is worth to recall two important assumptions to ensure the validity of RD designs: (1) There is no precise manipulation of the running variable by the agents, which is commented in subsection \ref{subsec:mccrary}; (2) Other characteristics affecting the outcome do not change discontinuously at the threshold. This assumption is not testable as this data set has no information about other characteristics of communes.
+%
+\subsubsection{Polynomial Regression}
+%
+Implementing RD designs by polynomial regression is the simplest way to proceed. However, there are also concerns for its validity. First, using observations far away to estimate the outcome at the cutpoint may yield biases. This can be solved by trimming to limit the support of running variable to a certain range around the threshold. In addition, one may be tempted to introduce higher-order polynomials of the running variable in the regression. However, this practice can lead to several severe problems, including noisy estimates and sensitivity to the order of polynomials (\cite{gelman2014high}). There are cases where the data is over-fitted. The authors therefore recommend the use of local linear or quadratic polynomials. For the sake of completeness and as comparison for other methods below, the order 1, 2, 3 and 4 are still employed in this section, even though the interpretation should be done with cautions. \\
+The model with polynomial of order 1 takes the form:
+$$Y = \alpha + \beta Z + \gamma (X - c) + \delta Z (X - c) + \epsilon$$
+with $Z = \mathbbm{1}{(X \geq c)}$, $X$ is the running varible and c is the threshold. In this model, the coefficient $\beta$ is interpreted as the intention-to-treat. By keeping the interaction term, I allow the polynomial on each side of the threshold to take a different form. However, it is imposed that the orders on both sides are the same. \\
+Figures \ref{fig:poly_nb_log} and \ref{fig:poly_nb} show the graphical presentation of the estimation results in log and level forms respectively, with detailed estimates for log form in table \ref{tab:poly_nb_log} \footnote{This and all subsequent tables are generated using R package "Stargazer" by \cite{stargazer2015}.}, using the number of farms in 1970 as outcome. Additionally, figure \ref{fig:placebo_poly} shows the results of the placebo test for this approach in log form. The outcome variable here is the number of farms in 1955 when there was not yet any treatment. \\
+We can see that the log and level forms give quite similar results. However, the orders 1 and 2 give significant results but with different signs while estimation results of order 3 and 4 do not make much sense, given the magnitude of coefficients for higher-order terms. It is therefore difficult to interpret these estimates, especially after considering the results in placebo test in which the polynomial of order 1 provides an opposite effects compared to previous regression. Another remark is that the fitted line on the right hand side of the cutoff always takes the (near) linear form, demonstrating the sensitivity of this approach to outcomes of observations far away from the cutoff, as noted by \cite{imbens2008regression}.
+<<Polynomials_estimation_log,eval=TRUE,echo=FALSE,results='hide'>>=
+# Use the same order of polynomial on both sides
+c <- 2.0
+Y <- log(dataset_full$nb_farm1970)
+Z <- dataset_full$handicap_total >= c
+X <- dataset_full$handicap_total - c
+
+# Different orders
+rd_poly_nb_log <- lm(Y ~ Z + X + I(Z*X))
+rd_poly_nb2_log <- lm(Y ~ Z + X + I(X^2) + I(Z*X) + I(Z*(X^2)))
+rd_poly_nb3_log <- lm(Y ~ Z + X + I(X^2) + I(X^3) + I(Z*X) + I(Z*(X^2)) + I(Z*(X^3)))
+rd_poly_nb4_log <- lm(Y ~ Z + X + I(X^2) + I(X^3) + I(X^4) + I(Z*X) + I(Z*(X^2)) + I(Z*(X^3)) + I(Z*(X^4)))
+
+# stargazer(rd_poly_nb_log,rd_poly_nb2_log,rd_poly_nb3_log,rd_poly_nb4_log, title = "Polynomials estimation", align = TRUE)
+@
+
+<<poly_nb_log,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='Polynomial Estimations for outcome in 1970 - Log form',fig.lp='fig:',fig.align='center',out.width='0.60\\textwidth',out.height='0.50\\textwidth',fig.pos='!htbp'>>=
+X <- X + c
+prd <- as.data.frame(predict.lm(rd_poly_nb_log, interval = c("confidence"), level = 0.95))
+dplot <- as.data.frame(cbind(Y,X,prd))
+prd2 <- as.data.frame(predict.lm(rd_poly_nb2_log, interval = c("confidence"), level = 0.95))
+dplot2 <- as.data.frame(cbind(Y,X,prd2))
+prd3 <- as.data.frame(predict.lm(rd_poly_nb3_log, interval = c("confidence"), level = 0.95))
+dplot3 <- as.data.frame(cbind(Y,X,prd3))
+prd4 <- as.data.frame(predict.lm(rd_poly_nb4_log, interval = c("confidence"), level = 0.95))
+dplot4 <- as.data.frame(cbind(Y,X,prd4))
+#
+plot1 <- ggplot(data=dplot,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 1") + xlab("NHI") + ylab("Log(Number of Farms)")
+plot2 <- ggplot(data=dplot2,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 2") + xlab("NHI") + ylab("Log(Number of Farms)") 
+plot3 <- ggplot(data=dplot3,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 3") + xlab("NHI") + ylab("Log(Number of Farms)")
+plot4 <- ggplot(data=dplot4,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 4") + xlab("NHI") + ylab("Log(Number of Farms)")
+grid.arrange(plot1,plot2,plot3,plot4, ncol=2,nrow=2)
+@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+<<Polynomials_estimation,eval=TRUE,echo=FALSE,results='hide'>>=
+# Use the same order of polynomial on both sides
+c <- 2.0
+Y <- dataset_full$nb_farm1970
+Z <- dataset_full$handicap_total >= c
+X <- dataset_full$handicap_total - c
+
+# Different orders
+rd_poly_nb <- lm(Y ~ Z + X + I(Z*X))
+rd_poly_nb2 <- lm(Y ~ Z + X + I(X^2) + I(Z*X) + I(Z*(X^2)))
+rd_poly_nb3 <- lm(Y ~ Z + X + I(X^2) + I(X^3) + I(Z*X) + I(Z*(X^2)) + I(Z*(X^3)))
+rd_poly_nb4 <- lm(Y ~ Z + X + I(X^2) + I(X^3) + I(X^4) + I(Z*X) + I(Z*(X^2)) + I(Z*(X^3)) + I(Z*(X^4)))
+
+# stargazer(rd_poly_nb,rd_poly_nb2,rd_poly_nb3,rd_poly_nb4, title = "Polynomials estimation", align = TRUE)
+@
+%
+<<poly_nb,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='Polynomial Estimations for outcome in 1970 - Level form',fig.lp='fig:',fig.align='center',out.width='0.60\\textwidth',out.height='0.50\\textwidth',fig.pos='!htbp'>>=
+X <- X + c
+prd <- as.data.frame(predict.lm(rd_poly_nb, interval = c("confidence"), level = 0.95))
+dplot <- as.data.frame(cbind(Y,X,prd))
+prd2 <- as.data.frame(predict.lm(rd_poly_nb2, interval = c("confidence"), level = 0.95))
+dplot2 <- as.data.frame(cbind(Y,X,prd2))
+prd3 <- as.data.frame(predict.lm(rd_poly_nb3, interval = c("confidence"), level = 0.95))
+dplot3 <- as.data.frame(cbind(Y,X,prd3))
+prd4 <- as.data.frame(predict.lm(rd_poly_nb4, interval = c("confidence"), level = 0.95))
+dplot4 <- as.data.frame(cbind(Y,X,prd4))
+#
+plot1 <- ggplot(data=dplot,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 1") + xlab("NHI") + ylab("Number of Farms")
+plot2 <- ggplot(data=dplot2,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 2") + xlab("NHI") + ylab("Number of Farms") 
+plot3 <- ggplot(data=dplot3,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 3") + xlab("NHI") + ylab("Number of Farms")
+plot4 <- ggplot(data=dplot4,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 4") + xlab("NHI") + ylab("Number of Farms")
+grid.arrange(plot1,plot2,plot3,plot4, ncol=2,nrow=2)
+rm(plot1,plot2,plot3,plot4)
+@
+%
+<<placebo_poly,eval=TRUE,echo=FALSE,results='asis',warning=FALSE,message=FALSE,fig.lp='fig:',fig.cap='Placebo test for polynomial estimations - outcome in 1955',fig.show='asis',fig.align='center',out.width='0.60\\textwidth',out.height='0.50\\textwidth',fig.pos='!htbp'>>=
+c <- 2.0
+Y <- log(dataset_full$nb_farm1955[dataset_full$nb_farm1955!=0])
+Z <- dataset_full$handicap_total[dataset_full$nb_farm1955!=0] >= c
+X <- dataset_full$handicap_total[dataset_full$nb_farm1955!=0] - c
+
+# Different orders
+rd_poly_placebo <- lm(Y ~ Z + X + I(Z*X))
+rd_poly_placebo2 <- lm(Y ~ Z + X + I(X^2) + I(Z*X) + I(Z*(X^2)))
+rd_poly_placebo3 <- lm(Y ~ Z + X + I(X^2) + I(X^3) + I(Z*X) + I(Z*(X^2)) + I(Z*(X^3)))
+rd_poly_placebo4 <- lm(Y ~ Z + X + I(X^2) + I(X^3) + I(X^4) + I(Z*X) + I(Z*(X^2)) + I(Z*(X^3)) + I(Z*(X^4)))
+
+X <- X + c
+prd <- as.data.frame(predict.lm(rd_poly_placebo, interval = c("confidence"), level = 0.95))
+dplot <- as.data.frame(cbind(Y,X,prd))
+prd2 <- as.data.frame(predict.lm(rd_poly_placebo2, interval = c("confidence"), level = 0.95))
+dplot2 <- as.data.frame(cbind(Y,X,prd2))
+prd3 <- as.data.frame(predict.lm(rd_poly_placebo3, interval = c("confidence"), level = 0.95))
+dplot3 <- as.data.frame(cbind(Y,X,prd3))
+prd4 <- as.data.frame(predict.lm(rd_poly_placebo4, interval = c("confidence"), level = 0.95))
+dplot4 <- as.data.frame(cbind(Y,X,prd4))
+#
+plot1 <- ggplot(data=dplot,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 1") + xlab("NHI") + ylab("Log(Number of Farms)")
+plot2 <- ggplot(data=dplot2,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 2") + xlab("NHI") + ylab("Log(Number of Farms)") 
+plot3 <- ggplot(data=dplot3,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 3") + xlab("NHI") + ylab("Log(Number of Farms)")
+plot4 <- ggplot(data=dplot4,aes(x=X,y=fit)) + geom_line() + geom_line(aes(x=X,y=lwr),col="blue",lty=2) + geom_line(aes(x=X,y=upr),col="blue",lty=2) + geom_vline(xintercept = c, col="blue",lty=1) + xlim(c(0,5)) + ggtitle("Order 4") + xlab("NHI") + ylab("Log(Number of Farms)")
+grid.arrange(plot1,plot2,plot3,plot4, ncol=2, nrow=2)
+@
+% Table created by stargazer v.5.2 by Marek Hlavac, Harvard University. E-mail: hlavac at fas.harvard.edu
+% Date and time: Sun, May 21, 2017 - 4:07:38 PM
+% Requires LaTeX packages: dcolumn 
+\begin{table}[!htbp] \centering 
+  \caption{Polynomials estimation results - Log form} 
+  \label{tab:poly_nb_log}
+\resizebox{\columnwidth}{!}{%
+\bgroup
+\def\arraystretch{1.5}
+\begin{tabular}{@{\extracolsep{5pt}}lD{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} } 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{4}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-5} 
+\\[-1.8ex] & \multicolumn{4}{c}{Log (Number of Farms)} \\ 
+\\[-1.8ex] & \multicolumn{1}{c}{\makecell{Order 1 \\ (1)}} & \multicolumn{1}{c}{\makecell{Order 2 \\ (2)}} & \multicolumn{1}{c}{\makecell{Order 3 \\ (3)}} & \multicolumn{1}{c}{\makecell{Order 4 \\ (4)}}\\ 
+\hline \\[-1.8ex] 
+Z & 0.221^{***} & -0.189^{***} & 0.006 & 0.070 \\ 
+  & (0.033) & (0.052) & (0.072) & (0.093) \\ 
+  & & & & \\ 
+ $X-c$ & -0.093^{***} & 0.699^{***} & -0.170 & -0.450 \\ 
+  & (0.014) & (0.073) & (0.217) & (0.471) \\ 
+  & & & & \\ 
+ $(X-c)^2$ &  & 0.309^{***} & -0.562^{***} & -1.085 \\ 
+  &  & (0.028) & (0.206) & (0.809) \\ 
+  & & & & \\ 
+ $(X-c)^3$ &  &  & -0.247^{***} & -0.600 \\ 
+  &  &  & (0.058) & (0.532) \\ 
+  & & & & \\ 
+ $(X-c)^4$ &  &  &  & -0.079 \\ 
+  &  &  &  & (0.118) \\ 
+  & & & & \\ 
+ $Z*(X-c)$ & 0.079^{***} & -0.711^{***} & 0.164 & 0.400 \\ 
+  & (0.015) & (0.073) & (0.218) & (0.473) \\ 
+  & & & & \\ 
+ $Z*(X-c)^2$ &  & -0.309^{***} & 0.561^{***} & 1.096 \\ 
+  &  & (0.028) & (0.206) & (0.809) \\ 
+  & & & & \\ 
+ $Z*(X-c)^3$ &  &  & 0.247^{***} & 0.599 \\ 
+  &  &  & (0.058) & (0.532) \\ 
+  & & & & \\ 
+ $Z*(X-c)^4$ &  &  &  & 0.079 \\ 
+  &  &  &  & (0.118) \\ 
+  & & & & \\ 
+ Constant & 3.319^{***} & 3.726^{***} & 3.526^{***} & 3.489^{***} \\ 
+  & (0.025) & (0.044) & (0.065) & (0.085) \\ 
+  & & & & \\ 
+\hline \\[-1.8ex] 
+Observations & \multicolumn{1}{c}{27,928} & \multicolumn{1}{c}{27,928} & \multicolumn{1}{c}{27,928} & \multicolumn{1}{c}{27,928} \\ 
+R$^{2}$ & \multicolumn{1}{c}{0.002} & \multicolumn{1}{c}{0.006} & \multicolumn{1}{c}{0.007} & \multicolumn{1}{c}{0.007} \\ 
+Adjusted R$^{2}$ & \multicolumn{1}{c}{0.002} & \multicolumn{1}{c}{0.006} & \multicolumn{1}{c}{0.007} & \multicolumn{1}{c}{0.007} \\ 
+Residual Std. Error & \multicolumn{1}{c}{0.873 (df = 27924)} & \multicolumn{1}{c}{0.871 (df = 27922)} & \multicolumn{1}{c}{0.871 (df = 27920)} & \multicolumn{1}{c}{0.871 (df = 27918)} \\ 
+F Statistic & \multicolumn{1}{c}{18.750$^{***}$ (df = 3; 27924)} & \multicolumn{1}{c}{36.048$^{***}$ (df = 5; 27922)} & \multicolumn{1}{c}{28.365$^{***}$ (df = 7; 27920)} & \multicolumn{1}{c}{22.341$^{***}$ (df = 9; 27918)} \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{4}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular}
+\egroup
+}
+\end{table}
+%
+\subsubsection{Plug-in nonparametric method}
+%
+For RD designs, nonparametric regression proves to be superior than polynomial regressions due to the lack of restrictions on functional form and to its use of only observations close to the threshold. The idea behind nonparametric regressions is to estimate separately each point using observations close to it, with greater weights given to closer ones. There are two important parameters to be chosen: the span of closeness or the bandwidth, and the kernel function giving weights to nearby observations. \\
+Among nonparametric estimators, Local Linear Regression (LLR) is favored for 2 reasons. Let us assume that we want to estimate the outcome y at independent variable value x with bandwidth h. While traditional kernels such as uniform or rectangular simply perform weighted average over outcome of observations in the range $(x - h, x + h)$, LLR fits a linear line over this same range. According to \cite{hahn2001identification}, by doing so, it can avoid the boundary problem in estimating outcome at the cutoff value. Additionally, when the running variable is also a covariate, which is the case for this data sample, LLR can achieve a lower bias, or it is rate-efficient (\cite{imbens2008regression}, \cite{imbens2011optimal}). As a result, in this subsection and the next, LLR will be employed. The difference between the 2 subsections lies in the way the optimal bandwidth is chosen. \\
+Here, the bandwidth is chosen by the plug-in method proposed by \cite{imbens2011optimal}. They claim that "standard plug-in methods and cross-validation methods, which choose a bandwidth that is optimal for estimating the regression function over the entire support, do not yield an optimal bandwidth [for RD designs]", and that their data-driven bandwidth is asymptotically optimal. For this, the same bandwidth is used for both sides of the cutoff. The estimation using this method is made easy using the R package "rdd" by \cite{rdd2016}.
+%%%%%%%%%%%%%%%%%%% LLR with RDD package %%%%%%%%%%%%%%%%%%%%%
+<<rdd_package_llr,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+##### RDD estimation ########
+# Imbens-Kalyanaraman optimal bandwidth for LLR
+# This method selects the same bandwidth for both sides
+##### Bandwidth for nb_farmXXXX as outcome variable; kernel = triangular
+###### Year 1970 ######
+c <- 2.0
+bw_nb_1970 <- IKbandwidth(dataset_full$handicap_total, log(dataset_full$nb_farm1970), kernel='triangular', cutpoint = c)
+rdmodel_nb_1970 <- RDestimate(log(nb_farm1970) ~ handicap_total + montagne_dummy_1974, data = dataset_full, kernel='triangular', cutpoint = c)
+# summary(rdmodel_nb_1970)
+bw_sau_1970 <- IKbandwidth(dataset_full$handicap_total, log(dataset_full$sau1970), kernel='triangular', cutpoint = c)
+rdmodel_sau_1970 <- RDestimate(log(sau1970) ~ handicap_total + montagne_dummy_1974, data = dataset_full, kernel='triangular', cutpoint = c, bw=bw_sau_1970)
+#### Twice default bandwidth to check sensitivity to bandwidth choice
+rdmodel_nb_1970_2 <- RDestimate(log(nb_farm1970) ~ handicap_total + montagne_dummy_1974, data = dataset_full, kernel='triangular', cutpoint = c, bw = 2*bw_nb_1970)
+
+### Year 1979 ###
+# bw_nb_1979 <- IKbandwidth(dataset_full$handicap_total, log(dataset_full$nb_farm1979), cutpoint = c,kernel="triangular")
+# rdmodel_nb_1979 <- RDestimate(log(nb_farm1979) ~ handicap_total + montagne_dummy_1978, data = dataset_full, cutpoint = c, bw=bw_nb_1979, kernel = "triangular")
+# rdmodel_nb_1979_2 <- RDestimate(log(nb_farm1979) ~ handicap_total + montagne_dummy_1978, data = dataset_full, cutpoint = c, bw = 2*bw_nb_1979, kernel = "triangular")
+# bw_sau_1979 <- IKbandwidth(dataset_full$handicap_total, log(dataset_full$sau1979), cutpoint = c,kernel="triangular")
+# rdmodel_sau_1979 <- RDestimate(log(sau1979) ~ handicap_total + montagne_dummy_1978, data = dataset_full, cutpoint = c, bw=bw_sau_1979, kernel = "triangular")
+@
+%
+<<plugin_default,eval=TRUE,echo=FALSE,results='asis',fig.lp='fig:',fig.cap='Plug-in nonparametric method with default optimal bandwidth (Number of farms as outcome)',fig.show='asis',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# png("plugin_nb.png", width = 640, height = 960)
+par(mar=c(5.1,5.6,4.1,3.1))
+# par(mfrow=c(3,1))
+#par(cex.axis = 2, cex.main = 2, cex.lab = 2.5)
+plot(rdmodel_nb_1970, which = 1, range = c(0,7), asp = 0.80)
+title(main = paste0("Year 1970: bandwidth ", round(bw_nb_1970,2)), xlab = "NHI", ylab = "Log(Number of farms)")
+abline(v=c, col="red",lty=1)
+@
+%
+<<plugin_default_sau,eval=TRUE,echo=FALSE,results='asis',fig.lp='fig:',fig.cap='Plug-in nonparametric method with default optimal bandwidth (Usable Farm Land as outcome)',fig.show='asis',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+### sau
+# png("plugin_sau.png", width = 640, height = 960)
+par(mar=c(5.1,5.6,4.1,3.1))
+# par(mfrow=c(3,1))
+#par(cex.axis = 2, cex.main = 2, cex.lab = 2.5)
+plot(rdmodel_sau_1970, which = 1, range = c(0,7), asp = 0.80)
+title(main = paste0("Year 1970: bandwidth ", round(bw_sau_1970,2)), xlab = "NHI", ylab = "Log(Usable Farm Land)")
+abline(v=c, col="red",lty=1)
+@
+%
+Estimation results are presented in figures \ref{fig:plugin_default} and \ref{fig:plugin_default_sau} for number of farms and usable farm land in log form in 1970, respectively. The gap seen in these graphs is the intention-to-treat. Using the default optimal bandwidth, I find no significant effect of the treatment for both outcome measures (The intention-to-treat is significant in figure \ref{fig:plugin_default_sau}, but when combined with the change in probability of receiving the treatment at the threshold, the LATE given by the model is insignificant). However, if a bandwidth twice as large as the default one is used, a positive treatment effect is found, as can be seen in figure \ref{fig:plugin_twice}. The shape in this figure is similar to the one of polynomial regression of order 1 seen in previous subsection because with this big bandwidth, LLR is not so much different from polynomial regression. For instance, on the left hand side, all observations are used. The treatment effect found using double the optimal bandwidth is not to conclude that it exists and is positive. Rather, it implies that the RD design applied here is sensitive to the choice of bandwidth even though the placebo test using the doubled default bandwidth yields no significant result as well (see figure \ref{fig:placebo_plugin_twice}). Therefore, the plug-in method is not likely to provide meaningful estimation for this particular case.
+%
+<<plugin_twice,eval=TRUE,echo=FALSE,results='asis',fig.lp='fig:',fig.cap='Plug-in nonparametric method with doubled default optimal bandwidth',fig.show='asis',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# png("plugin_nb_twice.png", width = 640, height = 960)
+par(mar=c(5.1,5.6,4.1,3.1))
+# par(mfrow=c(3,1))
+#par(cex.axis = 2, cex.main = 2, cex.lab = 2.5)
+plot(rdmodel_nb_1970_2, which = 1, range = c(0,7), asp = 0.80)
+title(main = paste0("Year 1970: bandwidth ", 2*round(bw_nb_1970,2)), xlab = "NHI", ylab = "Number of farms")
+abline(v=c, col="red",lty=1)
+@
+% Figure \ref{fig:placebo_plugin} shows the results for the placebo test using the plug-in method with default badnwidth and figure \ref{fig:placebo_plugin_twice} with twice the default bandwidth.
+%
+<<plugin_placebo_estimate,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+## Placebo with plug-in method
+dataset_full <- dataset_full[dataset_full$nb_farm1955!=0,]
+bw_placebo <- IKbandwidth(dataset_full$handicap_total, log(dataset_full$nb_farm1955), cutpoint = c, verbose = FALSE, kernel='triangular') # 0.8891
+rdmodel_placebo <- RDestimate(log(nb_farm1955) ~ handicap_total + montagne_dummy_1962, data = dataset_full, cutpoint = c, kernel='triangular')
+rdmodel_placebo_twice <- RDestimate(log(nb_farm1955) ~ handicap_total + montagne_dummy_1962, data = dataset_full, cutpoint = c, bw = 2* bw_placebo, kernel='triangular')
+@
+%
+<<placebo_plugin,eval=TRUE,echo=FALSE,results='asis',warning=FALSE,message=FALSE,fig.lp='fig:',fig.cap='Placebo test with plug-in nonparametric method (default bandwidth)',fig.show='asis',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# par(mar=c(5.1,5.6,4.1,2.1))
+plot(rdmodel_placebo, which = 1, range = c(0,7))
+title(main = paste0("Year 1955: bandwidth ", round(bw_placebo,2)), xlab = "NHI", ylab = "Log(Number of farms)")
+abline(v=c,col="red",lty=1)
+@
+%
+<<placebo_plugin_twice,eval=TRUE,echo=FALSE,results='asis',warning=FALSE,message=FALSE,fig.lp='fig:',fig.cap='Placebo test with plug-in nonparametric method (twice default bandwidth)',fig.show='asis',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# par(mar=c(5.1,5.6,4.1,2.1))
+# par(cex.axis = 2, cex.main = 2, cex.lab = 2.5)
+plot(rdmodel_placebo_twice, which = 1, range = c(0,7))
+title(main = paste0("Year 1955: bandwidth ", 2*round(bw_placebo,2)), xlab = "NHI", ylab = "Log(Number of farms)")
+abline(v=c,col="red",lty=1)
+@
+%
+\clearpage
+\subsubsection{LLR with Cross Validation}
+% Bias - Variance tradeoff --> optimal bandwidth with leave-one-out approach (prediction errors)
+This subsection adopts the leave-one-out cross validation to choose the optimal bandwidth. The optimal bandwidth will minimize the Mean Squared Errors:
+$$MSE = \frac{1}{n} \sum_{i=1}^{n} (Y_{i} - \hat{f}_{-i} (X_{i}))^2 $$ 
+in which $\hat{f}_{-i} (X_{i})$ is estimated by LLR leaving out the pair $(X_{i},Y_{i})$. There is a short-cut formula to calculate MSE, as follow:
+$$MSE = \frac{1}{n} \sum_{i=1}^{n} \big( \frac{Y_{i} - \hat{f}_{n} (x_{i})}{1 - L_{ii}} \big)^2$$
+with $L_{ii}$ is the element i along the diagonal of the smoothing matrix L. By using the short-cut formula to compute MSE, we can run LLR only once for each value of bandwidth instead of n times, one for each observation. Going further, MSE is usually approximated by generalized cross validation.
+$$GCV = \frac{1}{n (1 - \frac{trace(L)}{n})^2} \sum_{i=1}^{n} (Y_{i} - \hat{f} (X_{i}))^2$$
+The Generalized Cross Validation (GCV) will be used for this subsection, applying the R package "locfit" by \cite{locfit2013}. This method allows choosing 4 different bandwidths separately, one for each side of the cutoff for the outcome variable and the treatment assignment variable. The grid of trial values expands from 0.1 to twice the optimal bandwidth by the plug-in method (which is 3.6) and they are estimated using 50\% of the observations on each side of the cutoff. The MSE results are presented in figure \ref{fig:cv_plot} for the log of number of farms in 1970 and in figure \ref{fig:cv_plot2} for treatment assignment variable. Accordingly, the optimal bandwidth for outcome variable is 0.2 on the left and 1.1 on the right, and for program participation, it is 0.1 on both sides. Using these values, the intention-to-treat is estimated by LLR and is shown in figure \ref{fig:LLR_cv_plot}. This figure, apart from showing the estimation result, also illustrates the trade-off between bias and variance in choosing bandwidths. The small bandwidth on the left results in a less biased estimate but at the expense of high variance while the reverse is true for the right hand side. The intention-to-treat here is again insignificant and the propensity score change is even negative when NHI crosses the threshold.
+%
+<<gcv,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+# Generalized cross validation - Short cut formula
+c <- 2.0
+## Use only 50% of observations on each side
+test <- (dataset_full$handicap_total >= median(dataset_full$handicap_total[dataset_full$handicap_total < c])) & (dataset_full$handicap_total <= median(dataset_full$handicap_total[dataset_full$handicap_total >= c]))
+
+y <- log(dataset_full$nb_farm1970[test])
+z <- dataset_full$montagne_dummy_1974[test]
+x <- dataset_full$handicap_total[test]
+
+hmax <- 2*bw_nb_1970
+alphamat <- matrix(0,ncol=2,nrow=round(hmax/0.1,0))
+alphamat[,2] <-  seq(0.1,hmax,by=0.1)
+
+gcvs <- gcvplot(y[dataset_full$handicap_total <= c]~x[dataset_full$handicap_total <= c],alpha=alphamat,deg=1)
+gcv_nb_left <- gcvs$values
+bw_nb_1970_cv_left <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(y[dataset_full$handicap_total >= c]~x[dataset_full$handicap_total >= c],alpha=alphamat,deg=1)
+gcv_nb_right <- gcvs$values
+bw_nb_1970_cv_right <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(z[dataset_full$handicap_total <= c]~x[dataset_full$handicap_total <= c],alpha=alphamat,deg=1,family="binomial")
+gcv_ps_left <- gcvs$values
+bw_ps_1970_cv_left <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(z[dataset_full$handicap_total >= c]~x[dataset_full$handicap_total >= c],alpha=alphamat,deg=1,family="binomial")
+gcv_ps_right <- gcvs$values
+bw_ps_1970_cv_right <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+@
+%
+<<cv_plot,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='Generalized Cross Validation for outcome variable',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+#### Plot the MSE to choose the optimal bandwidth
+## CV graph for outcome
+par(mar=c(5,4,4,5))
+MSE_grid <- alphamat[,2]
+plot(MSE_grid,gcv_nb_right,pch=16,main = "GCV for log(number of farms) in 1970", xlab='Bandwidth',ylab='GCV, Above Threshold', col="red")
+legend(c(0.5,1.5),c(0.686,0.688),c('Above Threshold','Below Threshold'),pch=c(16,16),col=c("red","blue"),ncol=1, cex=0.80, bty = "n")
+par(new=TRUE)
+plot(MSE_grid,gcv_nb_left,pch=16,xaxt="n",yaxt="n",xlab="",ylab="",col="blue")
+axis(4)
+mtext("GCV, Below Threshold",side=4,line=3)
+@
+
+<<cv_plot2,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='Generalized Cross Validation for treatment assignment variable',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+## CV graph for treatment assignment
+par(mar=c(5,4,4,5))
+plot(MSE_grid,gcv_ps_right,pch=16,main = "GCV for treatment assignment in 1970", xlab='Bandwidth',ylab='GCV, Above Threshold', col="red")
+legend(c(0.5,1.5),c(0.36,0.37),c('Above Threshold','Below Threshold'),pch=c(16,16),col=c("red","blue"),ncol=1,cex=0.80, bty = "n")
+par(new=TRUE)
+plot(MSE_grid,gcv_ps_left,pch=16,xaxt="n",yaxt="n",xlab="",ylab="",col="blue")
+axis(4)
+mtext("GCV, Below Threshold",side=4,line=3)
+@
+%
+<<LLR_given_CV,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+ll <- function(x_i, y, x, h1, h2, c) {
+    if (x_i <= c){
+      wgts <- (1 - abs(x - x_i)/h1) * (abs(x - x_i) <= h1) * (sign(x_i - c) == sign(x - c) | x_i == c)
+    }
+    else {
+      wgts <- (1 - abs(x - x_i)/h2) * (abs(x - x_i) <= h2) * (sign(x_i - c) == sign(x - c) | x_i == c)
+    }
+    lm.fitted <- lm(y ~ x, weights = wgts)
+    if (sum(wgts > 0) > 10) {
+        # Require 10 observations around x_i
+        return(predict.lm(lm.fitted, newdata = data.frame(x = x_i), interval = c("confidence"), level = 0.95))
+    } else {
+        return(NA)
+    }
+}
+
+# Estimate for value around cutoff
+c <- 2.0
+rd_data <- dataset_full[,c("handicap_total","nb_farm1970","montagne_dummy_1974")]
+names(rd_data) <- c("X","y","D")
+rd_data$y <- log(rd_data$y)
+
+test <- abs(rd_data$X - c) <= 0.5
+y_fitted <- unlist(lapply(rd_data$X[test], ll, rd_data$y, rd_data$X, bw_nb_1970_cv_left, bw_nb_1970_cv_right, c))
+y_fitted <- matrix(y_fitted, ncol = 3, nrow = sum(test), byrow = TRUE)
+colnames(y_fitted) <- c("fit","lwr","upr")
+plot_data <- as.data.frame(cbind(rd_data[test,],y_fitted))
+# 
+# # Estimate for the cutoff only
+ps_right <- ll(c,rd_data$D[rd_data$X>=c],rd_data$X[rd_data$X>=c],bw_ps_1970_cv_right,bw_ps_1970_cv_left,c)
+ps_left <- ll(c,rd_data$D[rd_data$X<=c],rd_data$X[rd_data$X<=c],bw_ps_1970_cv_left,bw_ps_1970_cv_right,c)
+# 
+outcome_right <- ll(c,rd_data$y[rd_data$X>=c],rd_data$X[rd_data$X>=c],bw_nb_1970_cv_right,bw_nb_1970_cv_left,c)
+outcome_left <- ll(c,rd_data$y[rd_data$X<=c],rd_data$X[rd_data$X<=c],bw_nb_1970_cv_left,bw_nb_1970_cv_right,c)
+
+# outcome_right[1] - outcome_left[1] # Intention-to-treat
+# ps_right[1] - ps_left[1] # Change in propensity score
+@
+%
+<<LLR_cv_plot,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='LLR with optimal bandwidths chosen by GCV',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# # Make a plot
+ggplot(plot_data, aes(x = X)) + geom_line(aes(y = fit, color = X > c)) + geom_line(aes(y=lwr, color = X > c), lty = 2) + geom_line(aes(y=upr, color = X > c), lty = 2) + geom_vline(xintercept = c) + xlab("NHI") + ylab("Log(Number of farms) in 1970")
+@
+
+%
+<<LLR_CV_plugin,eval=FALSE,echo=FALSE,results='hide'>>=
+# bw <- min(c(cv_bw_nb_right,cv_bw_nb_left,cv_bw_ps_right,cv_bw_ps_left))
+bw <- 0.1
+c <- 2.0
+
+rdmodel_cv <- RDestimate(log(nb_farm1970) ~ handicap_total + montagne_dummy_1974, data = dataset_full, bw = bw, cutpoint = c)
+# summary(rdmodel_cv)
+
+plot(rdmodel_cv, which = 1, range = c(0,7))
+title(main = paste0("Year 1970: bandwidth ", bw), xlab = "NHI", ylab = "Log(Number of farms)")
+abline(v=c,col="red",lty=1)
+# stargazer(rdd_llr)
+@
+
+%
+\subsubsection{RDD with AHI and/or SHI as running variable} % \label{sec:multiple_runnings}
+As discussed in program description section, the theoretical eligibility conditions include 2 separate criteria among which participating communes have to satisfy at least one. In an attempt to understand the RD design in the face of multiple criteria, I will implement this design using AHI and/or SHI as running variable separately and hopefully together within a model. It is important to note that there is no simple relationship between communal average altitude or slope with the indices due to the way AHI and SHI are computed. Therefore, it is impossible to translate the requirement concerning average communal altitude and slope into a cutoff value for these indices. The candidates for the cutoff are identified visually in a subjective manner. \\
+Figure \ref{fig:rdd_multi_histo} demonstrates the heatmap of participating communes in 1962 over the AHI and SHI. It seems that AHI has more role to play than SHI in deciding the eligibility of a commune. The most reasonable estimate of the cutoff if AHI is to be used as the running variable is 1.0. Given this value, the estimation results are shown in figure \ref{fig:rdd_multiple_plugin}. Again, the treatment effect is insignificant at the threshold for both the plug-in method and the one using Cross Validation.
+<<rdd_multi_histo,eval=TRUE,echo=FALSE,results='asis',fig.cap='Heatmap of participants in 1962 against AHI and SHI',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# max(dataset_full$handicap_altitude[dataset_full$montagne_dummy_1962==1])
+# max(dataset_full$handicap_pente[dataset_full$montagne_dummy_1962==1])
+x1_cut <- cut(dataset_full$handicap_altitude[dataset_full$montagne_dummy_1962==1],breaks=seq(0,19,by=0.5))
+x2_cut <- cut(dataset_full$handicap_pente[dataset_full$montagne_dummy_1962==1],breaks=seq(0,8,by=0.5))
+# x1_cut <- cut(dataset_full$handicap_altitude[dataset_full$montagne_dummy_1962==1],19)
+# x2_cut <- cut(dataset_full$handicap_pente[dataset_full$montagne_dummy_1962==1],19)
+z <- table(x1_cut,x2_cut)
+image2D(z=z, border="black",xlab="AHI (0 to 19, step 0.5)",ylab="SHI (0 to 8, step 0.5)")
+# hist3D(z=z, border="black")
+@
+%
+<<rdd_multiple_plugin,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='Plug-in method using only AHI with cutoff 1.0',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+c_a <- 1.0
+bw_ahi <- IKbandwidth(dataset_full$handicap_altitude, log(dataset_full$nb_farm1970),cutpoint = c_a)
+rdmodel_ahi_1970 <- RDestimate(log(nb_farm1970) ~ handicap_altitude + montagne_dummy_1974, bw = bw_ahi, data = dataset_full, cutpoint = c_a)
+# summary(rdmodel_ahi_1970)
+plot(rdmodel_ahi_1970, which = 1, xlim=c(0,7))
+title(main = paste0("Year 1970: bandwidth ", round(bw_ahi,2)), xlab = "AHI", ylab = "Log(Number of farms)")
+abline(v=c_a,col="red")
+#plot(rdmodel_ahi_1970, which = 2, xlim=c(0,7))
+#abline(v=c_a,col="red")
+@
+%
+<<gcv_multi,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+# Generalized cross validation - Short cut formula
+c_a <- 1.0
+## Use only 50% of observations on each side
+test <- (dataset_full$handicap_altitude >= median(dataset_full$handicap_altitude[dataset_full$handicap_altitude < c_a])) & (dataset_full$handicap_altitude <= median(dataset_full$handicap_altitude[dataset_full$handicap_altitude >= c_a]))
+
+y <- log(dataset_full$nb_farm1970[test])
+z <- dataset_full$montagne_dummy_1974[test]
+x <- dataset_full$handicap_altitude[test]
+
+hmax <- 2*bw_ahi
+alphamat <- matrix(0,ncol=2,nrow=round(hmax/0.1,0))
+alphamat[,2] <-  seq(0.1,round(hmax,0),by=0.1)
+
+gcvs <- gcvplot(y[dataset_full$handicap_altitude <= c]~x[dataset_full$handicap_altitude <= c],alpha=alphamat,deg=1)
+bw_ahi1 <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(y[dataset_full$handicap_altitude >= c]~x[dataset_full$handicap_altitude >= c],alpha=alphamat,deg=1)
+bw_ahi2 <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(z[dataset_full$handicap_altitude <= c]~x[dataset_full$handicap_altitude <= c],alpha=alphamat,deg=1,family="binomial")
+bw_ahi3 <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(z[dataset_full$handicap_altitude >= c]~x[dataset_full$handicap_altitude >= c],alpha=alphamat,deg=1,family="binomial")
+bw_ahi4 <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+rd_data <- dataset_full[,c("handicap_altitude","nb_farm1970","montagne_dummy_1974")]
+names(rd_data) <- c("X","y","D")
+rd_data$y <- log(rd_data$y)
+
+test <- abs(rd_data$X - c_a) <= 0.2
+y_fitted <- unlist(lapply(rd_data$X[test], ll, rd_data$y, rd_data$X, bw_ahi1, bw_ahi2, c_a))
+y_fitted <- matrix(y_fitted, ncol = 3, nrow = sum(test), byrow = TRUE)
+colnames(y_fitted) <- c("fit","lwr","upr")
+plot_data <- as.data.frame(cbind(rd_data[test,],y_fitted))
+@
+
+<<ahi_multi_plot,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='LLR with optimal bandwidths chosen by GCV',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# # Make a plot
+ggplot(plot_data, aes(x = X)) + geom_line(aes(y = fit, color = X > 1.0)) + geom_line(aes(y=lwr, color = X > 1.0), lty = 2) + geom_line(aes(y=upr, color = X > 1.0), lty = 2) + geom_vline(xintercept = c_a) + xlab("AHI") + ylab("Log(Number of farms) in 1970")
+@
+
+%
+\subsubsection{McCrary Test} \label{subsec:mccrary}
+%
+<<McCrary_test,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE>>=
+## two-step McCrary's test
+a <- DCdensity(dataset_full$handicap_total, cutpoint = c, plot = FALSE,ext.out = TRUE)
+h <- a$bw
+b <- round(a$binsize,4)
+# a$theta
+# plot(a$data, xlim=c(1.8,2.2),ylim=c(0,1))
+
+g <- floor((dataset_full$handicap_total-c)/b)*b + b/2 + c
+# barplot(table(g),col='lightblue', xlim=c(0,round((c+1)/b,0)))
+
+X <- seq(min(g),max(g) + b, by = b)
+Y <- rep(999,length(X))
+for (j in 1:length(X)){
+  Y[j] <- (1/(length(X)*b))*sum(abs(g-X[j])<0.1^6)
+}
+
+# plot(Y~X, xlim=c(0,5))
+
+f.kernel.lm <- function(r,side,bandwidth,X,Y,cutpoint){
+  K <- apply(matrix((X-r)/bandwidth,ncol=1),1,function(x){return(max(0,1-abs(x)))})
+  X1 <- (X-r)
+  # side (below or above "c"):
+  if (side=="left"){
+    K1 <- K[X<cutpoint & r<cutpoint]
+    X1 <- X1[X<cutpoint & r<cutpoint]
+    Y1 <- Y[X<cutpoint & r<cutpoint]
+  }
+  if (side=="right"){
+    K1 <- K[X>cutpoint & r>=cutpoint]
+    X1 <- X1[X>cutpoint & r>=cutpoint]
+    Y1 <- Y[X>cutpoint & r>=cutpoint]
+  }
+  lm.kernel <- lm(Y1~X1+I(X1^2)+I(X1^3)+I(X1^4),weights=K1)
+  return(c(lm.kernel$coef[1],sqrt(vcov(lm.kernel)[1,1])))
+}
+
+f.density1 <- matrix(NA, nrow=length(X),ncol=2)
+max.x <- length(X)
+
+for (i in c(1:max.x)){
+  # cat("Iteration: ",i," out of ",max.x,"\n")
+  if (X[i]<c){
+    side0 <- "left"
+  }
+  if (X[i]>=c){
+    side0 <- "right"
+  }
+  f.density1[i,] <- f.kernel.lm(X[i],side=side0,bandwidth=h,X=X,Y=Y,cutpoint=c)
+}
+
+# f.estimate <- function(cutpoint,X,Y){
+#   r=cutpoint
+#   X.left = X[X<=cutpoint]
+#   Y.left = Y[X<=cutpoint]
+#   K.left = apply(matrix((X.left-r)/h,ncol=1),1,function(x){return(max(0,1-abs(x)))})
+#   X1.left = X.left-r
+#   lm.kernel.left = lm(Y.left~X1.left,weights=K.left)
+#   X.right = X[X>=cutpoint]
+#   Y.right = Y[X>=cutpoint]
+#   K.right = apply(matrix((X.right-r)/h,ncol=1),1,function(x){return(max(0,1-abs(x)))})
+#   X1.right = X.right-r
+#   lm.kernel.right = lm(Y.right~X1.right,weights=K.right)
+#   theta <- log(coef(lm.kernel.right)[1])-log(coef(lm.kernel.left)[1])
+#   return(theta)
+# }
+# theta.obs <- f.estimate(cutpoint=c,X=X,Y=Y)
+@
+The inconsistencies aforementioned in the program implementation in 1962 can come from the fact that altitude and slope were calculated manually and to some extent in a random manner before it was automated by a software in 1990 (\cite{interim2003ichn}). It can also suggest that there could be manipulations in criteria computation. \\
+Specifically for RD designs, \cite{mccrary2008manipulation} proposes a density test to detect if there is a precise manipulation of the running variable by the agents. If the manipulation is more likely than computation errors, McCrary test for this case confirms that the manipulation around the cutoff 2.0 was precise. The estimated density near the cutoff is shown in figure \ref{fig:mccrary_plot}, with the change in density of \Sexpr{round(a$theta,4)} (standard error: \Sexpr{round(a$se,4)}). The result of this density test offers one possible explanation for the failure of RD design in this analysis. \\
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Difference-in-Difference} \label{subsec:did}
+% Why choose DID?
+The first version of the program started in 1960s. Thanks to data's availability, Difference-in-Difference method can be used here. The main assumption for the DID method is the parallel trend assumption; that is, in the absence of the program, all economic and non-economic factors such as the competition in the market for agricultural products have the same impact on communes in the control and in the treatment group. This assumption can be tested if we have data at least 2 dates before the treatment. \\
+The model used for this section is individual fixed effect model:
+$$Y_{i,t} = \mu_{i} + \delta_{t} + \beta t_{i} D_{i} + U_{i}$$
+with $D_i$ is the dummy indicating treatment status and t is time period. $t=0$ before the treatment and $t=1$ after the treatment. It is equivalent to
+$$Y_{i,1} - Y_{i,0} = \delta_{1} -\delta_{0} + \beta t_{i} D_{i}$$
+The coefficient $\beta$ therefore represents the treatment effect, if any. \\
+%
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[scale=0.4]{sample.png}
+  \caption{Sample construction for DID analysis}
+  \label{fig:sample_select}
+\end{figure}
+In this section, 3 different samples are used. The construction of these samples is explained in figure \ref{fig:sample_select}, with numbered regions representing new participants for each year. Sample 1 (Regions 1 and 5) consists of communes that were receiving the payment in 1962 as the treatment group and communes that are not participating until 2012 as the control group. This sample consists of 26,666 observations with 2,710 communes receiving the subsidy. By doing so, we have outcome data for one period before the treatment (1955) and several periods after the treatment. The evolution of outcome variables (log form) in sample 1 is depicted in figure \ref{fig:did_nb2} and figure \ref{fig:did_sau2} together with the counter-factual values if we assume that the trend is parallel since 1955. \\
+Sample 2 leverages the substantial increase in the number of participants between 1970 and 1979. This sample has the same control group as sample 1 (Region 5) to make them comparable and its treatment group consists of communes which attained the status between the two dates, that is communes not treated in 1970 but started to join before 1979 (Region 3: 825 units). If a treatment effect is found for both samples, we can be more sure that the program actually brings about benefits for the participating communes. Furthermore, this sample provides data at 2 dates before the treatment, allowing the parallel trend assumption to be tested. The treatment effect can be adjusted according to this test result. \\
+Sample 3 (Regions 2 and 3) includes 412 communes that were new in 1970 (control group) and 825 communes that were new in 1979 (treatment group). This sample is used to test whether communes added to the program at different stages enjoyed similar benefits. \\
+% Check representativeness of those samples
+<<DID_data,eval=TRUE,echo=FALSE,results='hide'>>=
+## Consider 2 data samples
+test <- dataset_full$montagne_dummy_2012==0 | dataset_full$montagne_dummy_1962==1 | (dataset_full$montagne_dummy_1974==0 & dataset_full$montagne_dummy_1978==1) | ( dataset_full$montagne_dummy_1978==0 & dataset_full$montagne_dummy_1987==1)
+did_sample <- dataset_full[test,]
+# To use log form
+did_sample <- did_sample[did_sample$nb_farm1955!=0 & did_sample$sau1955!=0,]
+# First way to construct D
+did_sample$D1970 <- did_sample$montagne_dummy_1962
+did_sample$D1979 <- ifelse(did_sample$montagne_dummy_1974==0 & did_sample$montagne_dummy_1978==1,1,0)
+did_sample$D1988 <- ifelse(did_sample$montagne_dummy_1978==0 & did_sample$montagne_dummy_1987==1,1,0)
+did_sample$D2012 <- did_sample$montagne_dummy_2012
+
+test <- dataset_full$montagne_dummy_1962==0 & dataset_full$montagne_dummy_1978==1
+sample3 <- dataset_full[test,]
+@
+
+<<DID_graph,eval=TRUE,echo=FALSE,results='hide'>>=
+did_graph_nb <- as.data.frame(matrix(0, ncol = 7, nrow = 6))
+names(did_graph_nb) <- c("Year","NoF - Control","NoF - Treatment","NoF - Counterfactual","UFL - Control","UFL - Treatment","UFL - Counterfactual")
+
+did_graph_nb[1,2] <- round(mean(did_sample$nb_farm1955[did_sample$D1970==0]),2)
+did_graph_nb[2,2] <- round(mean(did_sample$nb_farm1970[did_sample$D1970==0]),2)
+did_graph_nb[3,2] <- round(mean(did_sample$nb_farm1979[did_sample$D1970==0]),2)
+did_graph_nb[4,2] <- round(mean(did_sample$nb_farm1988[did_sample$D1970==0]),2)
+did_graph_nb[5,2] <- round(mean(did_sample$nb_farm2000[did_sample$D1970==0]),2)
+did_graph_nb[6,2] <- round(mean(did_sample$nb_farm2010[did_sample$D1970==0]),2)
+
+did_graph_nb[1,3] <- round(mean(did_sample$nb_farm1955[did_sample$D1970==1]),2)
+did_graph_nb[2,3] <- round(mean(did_sample$nb_farm1970[did_sample$D1970==1]),2)
+did_graph_nb[3,3] <- round(mean(did_sample$nb_farm1979[did_sample$D1970==1]),2)
+did_graph_nb[4,3] <- round(mean(did_sample$nb_farm1988[did_sample$D1970==1]),2)
+did_graph_nb[5,3] <- round(mean(did_sample$nb_farm2000[did_sample$D1970==1]),2)
+did_graph_nb[6,3] <- round(mean(did_sample$nb_farm2010[did_sample$D1970==1]),2)
+
+did_graph_nb[1,4] <- did_graph_nb[1,3]
+did_graph_nb[2,4] <- did_graph_nb[1,4] + did_graph_nb[2,2] - did_graph_nb[1,2]
+did_graph_nb[3,4] <- did_graph_nb[2,4] + did_graph_nb[3,2] - did_graph_nb[2,2]
+did_graph_nb[4,4] <- did_graph_nb[3,4] + did_graph_nb[4,2] - did_graph_nb[3,2]
+did_graph_nb[5,4] <- did_graph_nb[4,4] + did_graph_nb[5,2] - did_graph_nb[4,2]
+did_graph_nb[6,4] <- did_graph_nb[5,4] + did_graph_nb[6,2] - did_graph_nb[5,2]
+
+did_graph_nb[1,5] <- round(mean(did_sample$sau1955[did_sample$D1970==0]),2)
+did_graph_nb[2,5] <- round(mean(did_sample$sau1970[did_sample$D1970==0]),2)
+did_graph_nb[3,5] <- round(mean(did_sample$sau1979[did_sample$D1970==0]),2)
+did_graph_nb[4,5] <- round(mean(did_sample$sau1988[did_sample$D1970==0]),2)
+did_graph_nb[5,5] <- round(mean(did_sample$sau2000[did_sample$D1970==0]),2)
+did_graph_nb[6,5] <- round(mean(did_sample$sau2010[did_sample$D1970==0]),2)
+
+did_graph_nb[1,6] <- round(mean(did_sample$sau1955[did_sample$D1970==1]),2)
+did_graph_nb[2,6] <- round(mean(did_sample$sau1970[did_sample$D1970==1]),2)
+did_graph_nb[3,6] <- round(mean(did_sample$sau1979[did_sample$D1970==1]),2)
+did_graph_nb[4,6] <- round(mean(did_sample$sau1988[did_sample$D1970==1]),2)
+did_graph_nb[5,6] <- round(mean(did_sample$sau2000[did_sample$D1970==1]),2)
+did_graph_nb[6,6] <- round(mean(did_sample$sau2010[did_sample$D1970==1]),2)
+
+did_graph_nb[1,7] <- did_graph_nb[1,6]
+did_graph_nb[2,7] <- did_graph_nb[1,7] + did_graph_nb[2,5] - did_graph_nb[1,5]
+did_graph_nb[3,7] <- did_graph_nb[2,7] + did_graph_nb[3,5] - did_graph_nb[2,5]
+did_graph_nb[4,7] <- did_graph_nb[3,7] + did_graph_nb[4,5] - did_graph_nb[3,5]
+did_graph_nb[5,7] <- did_graph_nb[4,7] + did_graph_nb[5,5] - did_graph_nb[4,5]
+did_graph_nb[6,7] <- did_graph_nb[5,7] + did_graph_nb[6,5] - did_graph_nb[5,5]
+
+did_graph_nb[,1] <- c(1955,1970,1979,1988,2000,2010)
+
+data_plot <- melt(did_graph_nb, id.vars="Year")
+
+### Plot with log
+did_nb2 <- did_graph_nb
+names(did_nb2) <- c("Year","Log(NoF) - Control","Log(NoF) - Treatment","Log(NoF) - Counterfactual","Log(UFL) - Control","Log(UFL) - Treatment","Log(UFL) - Counterfactual")
+did_nb2[,2] <- log(did_graph_nb[,2])
+did_nb2[,3] <- log(did_graph_nb[,3])
+did_nb2[,5] <- log(did_graph_nb[,5])
+did_nb2[,6] <- log(did_graph_nb[,6])
+did_nb2[1,4] <- did_nb2[1,3]
+did_nb2[2,4] <- did_nb2[1,4] + did_nb2[2,2] - did_nb2[1,2]
+did_nb2[3,4] <- did_nb2[2,4] + did_nb2[3,2] - did_nb2[2,2]
+did_nb2[4,4] <- did_nb2[3,4] + did_nb2[4,2] - did_nb2[3,2]
+did_nb2[5,4] <- did_nb2[4,4] + did_nb2[5,2] - did_nb2[4,2]
+did_nb2[6,4] <- did_nb2[5,4] + did_nb2[6,2] - did_nb2[5,2]
+did_nb2[1,7] <- did_nb2[1,6]
+did_nb2[2,7] <- did_nb2[1,7] + did_nb2[2,5] - did_nb2[1,5]
+did_nb2[3,7] <- did_nb2[2,7] + did_nb2[3,5] - did_nb2[2,5]
+did_nb2[4,7] <- did_nb2[3,7] + did_nb2[4,5] - did_nb2[3,5]
+did_nb2[5,7] <- did_nb2[4,7] + did_nb2[5,5] - did_nb2[4,5]
+did_nb2[6,7] <- did_nb2[5,7] + did_nb2[6,5] - did_nb2[5,5]
+
+data_plot2 <- melt(did_nb2, id.vars="Year")
+@
+%
+<<did_nb2,eval=TRUE,echo=FALSE,results='hide',fig.cap='Evolution of log of number of farms - Sample 1',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth', out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+ggplot(data=data_plot2[1:18,], aes(x=as.factor(Year), y=value, col=variable,group= variable)) + geom_point(na.rm=TRUE) + geom_line(na.rm=TRUE) + xlab("Year") + ylab("Log(Number of farms)") + theme(legend.position="top", legend.title = element_blank())
+@
+%
+<<did_sau2,eval=TRUE,echo=FALSE,results='hide',fig.cap='Evolution of log of usable farm land - Sample 1',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth', out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+ggplot(data=data_plot2[19:36,], aes(x=as.factor(Year), y=value, col=variable,group= variable)) + geom_point(na.rm=TRUE) + geom_line(na.rm=TRUE) + xlab("Year") + ylab("Log(Usable Farm Land)") + theme(legend.position="top", legend.title = element_blank())
+@
+%
+<<DID_fct,eval=TRUE,echo=FALSE,results='hide'>>=
+# Fixed Effect Model
+did_fe <- function(out_b,out_a,D){
+  y <- c(out_b,out_a)
+  t <- c(rep(0,length(out_b)),rep(1,length(out_a)))
+  D <- rep(D,2)
+  t.D <- t*D
+  data_fe <- cbind(c(seq(1,length(out_a)),seq(1,length(out_b))),t,y,D,t.D)
+  data_fe <- as.data.frame(data_fe)
+  names(data_fe) <- c("Individual","time","y","D","t.D")
+  DID_FE <- plm(y ~ time + t.D, data = data_fe, index = c("Individual", "time"), model = "within")
+  return(DID_FE)
+}
+@
+
+<<DID_estimate_log,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+#### Sample 1
+test <- did_sample$D1970==1 | did_sample$D2012==0
+did_s11_log <- did_fe(log(did_sample$nb_farm1955[test]),log(did_sample$nb_farm1970[test]),did_sample$D1970[test])
+did_s12_log <- did_fe(log(did_sample$nb_farm1970[test]),log(did_sample$nb_farm1979[test]),did_sample$D1970[test])
+#
+did_sau_s11_log <- did_fe(log(did_sample$sau1955[test]),log(did_sample$sau1970[test]),did_sample$D1970[test])
+did_sau_s12_log <- did_fe(log(did_sample$sau1970[test]),log(did_sample$sau1979[test]),did_sample$D1970[test])
+
+#### Sample 2
+test <- did_sample$D1979==1 | did_sample$D2012==0
+did_s21_log <- did_fe(log(did_sample$nb_farm1955[test]),log(did_sample$nb_farm1970[test]),did_sample$D1979[test])
+did_s22_log <- did_fe(log(did_sample$nb_farm1970[test]),log(did_sample$nb_farm1979[test]),did_sample$D1979[test])
+#
+did_sau_s21_log <- did_fe(log(did_sample$sau1955[test]),log(did_sample$sau1970[test]),did_sample$D1979[test])
+did_sau_s22_log <- did_fe(log(did_sample$sau1970[test]),log(did_sample$sau1979[test]),did_sample$D1979[test])
+
+#### Sample 3
+did_s31_log <- did_fe(log(sample3$nb_farm1955),log(sample3$nb_farm1970),sample3$montagne_dummy_1974)
+did_s32_log <- did_fe(log(sample3$nb_farm1970),log(sample3$nb_farm1979),sample3$montagne_dummy_1974)
+#
+did_sau_s31_log <- did_fe(log(sample3$sau1955),log(sample3$sau1970),sample3$montagne_dummy_1974)
+did_sau_s32_log <- did_fe(log(sample3$sau1970),log(sample3$sau1979),sample3$montagne_dummy_1974)
+#
+# stargazer(did_s11_log,did_s12_log, did_s21_log, did_s22_log, did_s31_log, did_s32_log, title="DID Estimation Results - Log(Number of farms)",align=TRUE)
+# stargazer(did_sau_s11_log,did_sau_s12_log, did_sau_s21_log, did_sau_s22_log, did_sau_s31_log, did_sau_s32_log, title="DID Estimation Results - Log(Usable Farm Land)",align=TRUE)
+@
+
+% Table created by stargazer v.5.2 by Marek Hlavac, Harvard University. E-mail: hlavac at fas.harvard.edu
+% Date and time: Sun, May 21, 2017 - 1:44:52 AM
+% Requires LaTeX packages: dcolumn 
+\begin{landscape}
+\begin{table}[!htbp] \centering 
+  \caption{DID Estimation Results} 
+  \label{tab:did_log}
+\resizebox{\columnwidth}{!}{%
+\bgroup
+\def\arraystretch{1.2}
+\begin{tabular}{@{\extracolsep{4pt}}lD{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} } 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{6}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-7} 
+\\[-1.8ex] & \multicolumn{6}{c}{Log(Number of farms)} \\ 
+\\[-1.8ex] & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1955 and 1970 \\ (1)}} & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1970 and 1979 \\ (2)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1955 and 1970 \\ (3)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1970 and 1979 \\ (4)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1955 and 1970 \\ (5)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1970 and 1979 \\ (6)}}\\ 
+\hline \\[-1.8ex] 
+ $\delta_{1} - \delta_{0}$ & -0.358^{***} & -0.213^{***} & -0.358^{***} & -0.213^{***} & -0.503^{***} & -0.230^{***} \\ 
+  & (0.002) & (0.001) & (0.002) & (0.001) & (0.012) & (0.007) \\ 
+  & & & & & & \\ 
+ t.D & -0.202^{***} & -0.042^{***} & -0.146^{***} & -0.017^{**} & -0.033 & -0.014 \\ 
+  & (0.007) & (0.004) & (0.012) & (0.007) & (0.021) & (0.012) \\ 
+  & & & & & & \\ 
+\hline \\[-1.8ex] 
+Observations & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{2,474} & \multicolumn{1}{c}{2,474} \\ 
+R$^{2}$ & \multicolumn{1}{c}{0.559} & \multicolumn{1}{c}{0.535} & \multicolumn{1}{c}{0.540} & \multicolumn{1}{c}{0.527} & \multicolumn{1}{c}{0.678} & \multicolumn{1}{c}{0.573} \\ 
+Adjusted R$^{2}$ & \multicolumn{1}{c}{0.117} & \multicolumn{1}{c}{0.071} & \multicolumn{1}{c}{0.079} & \multicolumn{1}{c}{0.054} & \multicolumn{1}{c}{0.355} & \multicolumn{1}{c}{0.146} \\ 
+F Statistic & \multicolumn{1}{c}{16,836.120$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{15,327.130$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{14,488.980$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{13,788.860$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{1,300.323$^{***}$ (df = 2; 1235)} & \multicolumn{1}{c}{830.262$^{***}$ (df = 2; 1235)} \\ 
+\hline 
+\hline \\[-1.8ex] 
+& \multicolumn{6}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-7} 
+\\[-1.8ex] & \multicolumn{6}{c}{Log(Usable Farm Land)} \\ 
+\\[-1.8ex] & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1955 and 1970 \\ (1)}} & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1970 and 1979 \\ (2)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1955 and 1970 \\ (3)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1970 and 1979 \\ (4)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1955 and 1970 \\ (5)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1970 and 1979 \\ (6)}}\\ 
+\hline \\[-1.8ex] 
+ $\delta_{1} - \delta_{0}$ & -0.071^{***} & -0.026^{***} & -0.071^{***} & -0.026^{***} & -0.384^{***} & -0.012 \\ 
+  & (0.002) & (0.001) & (0.002) & (0.001) & (0.016) & (0.010) \\ 
+  & & & & & & \\ 
+ t.D & -0.273^{***} & 0.036^{***} & -0.312^{***} & 0.013^{**} & -0.023 & 0.016 \\ 
+  & (0.007) & (0.004) & (0.011) & (0.006) & (0.028) & (0.017) \\ 
+  & & & & & & \\
+\hline \\[-1.8ex] 
+Observations & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{2,474} & \multicolumn{1}{c}{2,474} \\ 
+R$^{2}$ & \multicolumn{1}{c}{0.113} & \multicolumn{1}{c}{0.017} & \multicolumn{1}{c}{0.086} & \multicolumn{1}{c}{0.021} & \multicolumn{1}{c}{0.415} & \multicolumn{1}{c}{0.001} \\ 
+Adjusted R$^{2}$ & \multicolumn{1}{c}{-0.773} & \multicolumn{1}{c}{-0.965} & \multicolumn{1}{c}{-0.829} & \multicolumn{1}{c}{-0.958} & \multicolumn{1}{c}{-0.172} & \multicolumn{1}{c}{-1.000} \\ 
+F Statistic & \multicolumn{1}{c}{1,702.662$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{234.338$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{1,158.416$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{266.013$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{437.761$^{***}$ (df = 2; 1235)} & \multicolumn{1}{c}{0.813 (df = 2; 1235)} \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{6}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular}
+\egroup
+}
+\end{table} 
+\end{landscape}
+%
+Table \ref{tab:did_log} shows the results of DID estimations for number of farms and usable farm land (in log form) respectively. Column 1 is the result of estimation for sample 1 between 1955 and 1970. If the parallel trend assumption held, we could say that participating in the program actually does harm as the outcome variables in treatment group decrease more than those in control group. However, as shown in the estimation result for sample 2 between 1955 and 1970, the outcome variables in the treatment group tend to decrease more than their control counterparts in the absence of the program. This fact could be one of the reasons for the introduction of the rural development program in the 1960s. Note that \textbf{this regression in column (3) is a placebo test} in the sense that the treatment group in sample 2 did not receive the subsidy in 1970. Further investigation demonstrates that the treatment groups in these 2 samples differ in terms of Natural Handicap Index but at least the tendency of outcome variables is similar between 1955 and 1970 (See figure \ref{fig:sample_compare}). In addition, the regression results in columns (5) and (6) show that treated communes which joined the program at different dates do not differ significantly. Therefore, we can apply the placebo result of sample 2 to sample 1 with certain level of credibility. If we believe that communes with higher NHI are likely to suffer more from this trend, the gap between treatment and control groups could be even larger for sample 1. In other words, the parallel trend assumption is false to a greater extent for sample 1. \\
+Combining columns 1 and 2, and columns 3 and 4, it follows that \textbf{number of farms in treated communes still declines more than those in control group but the gap diminishes (1.7\% instead of 14.6\% for sample 2 before the treatment) and this can be attributable to the program.} For usable farm land, the effect is more positive. The figure for treated communes drops 3.6\% less in sample 1 and 1.3\% less in sample 2 compared to control groups. This conclusion is valid if we assume the trend between 1955 and 1970 continued between 1970 and 1979. This argument is again testable using communes that attained the mountain zone status after 1979, even though this sample size is very small, with only 14 observations. For reference, table \ref{tab:did_estimation} in Appendix \ref{app:did_level} illustrate the results for level form. The results of level form are consistent with the ones of log form, except for the number of farms between 1970 and 1979. Using level form, this quantity shows no significant difference between treatment groups and control group for this period and again, the closing gap between treatment and control groups is contributable to the program. \\
+<<sample_compare,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='Sample Comparison',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.90\\textwidth',fig.pos='!htbp'>>=
+### Compare samples
+test1 <- did_sample$D1970==1 | did_sample$D2012==0
+test2 <- did_sample$D1979==1 | did_sample$D2012==0
+#
+dgplot <- as.data.frame(cbind(c(log(did_sample[test1,]$nb_farm1955[did_sample[test1,]$D1970==1]),log(did_sample[test2,]$nb_farm1955[did_sample[test2,]$D1979==1])),c(rep(1,sum(did_sample[test1,]$D1970)),rep(2,sum(did_sample[test2,]$D1979)))))
+names(dgplot) <- c("nb_farm1955","sample")
+g1 <- ggplot(data=dgplot,aes(x=nb_farm1955, fill=as.factor(sample))) + geom_histogram(binwidth=0.5, alpha=0.2) + scale_fill_manual(name="Samples",values=c("red","blue"),labels=c("Sample 1", "Sample 2")) + xlab("Log(Number of farms in 1955)") + ylab("Count") + xlim(1,7) + geom_vline(xintercept = mean(log(did_sample[test1,]$nb_farm1955[did_sample[test1,]$D1970==1])),col="red",alpha=0.4) + geom_vline(xintercept = mean(log(did_sample[test2,]$nb_farm1955[did_sample[test2,]$D1979==1])),col="blue",alpha=0.4)
+#
+dgplot <- as.data.frame(cbind(c(log(did_sample[test1,]$nb_farm1970[did_sample[test1,]$D1970==1]),log(did_sample[test2,]$nb_farm1970[did_sample[test2,]$D1979==1])),c(rep(1,sum(did_sample[test1,]$D1970)),rep(2,sum(did_sample[test2,]$D1979)))))
+names(dgplot) <- c("nb_farm1970","sample")
+g2 <- ggplot(data=dgplot,aes(x=nb_farm1970, fill=as.factor(sample))) + geom_histogram(binwidth=0.5, alpha=0.2) + scale_fill_manual(name="Samples",values=c("red","blue"),labels=c("Sample 1", "Sample 2")) + xlab("Log(Number of farms in 1970)") + ylab("Count") + xlim(1,7) + geom_vline(xintercept = mean(log(did_sample[test1,]$nb_farm1970[did_sample[test1,]$D1970==1])),col="red",alpha=0.4) + geom_vline(xintercept = mean(log(did_sample[test2,]$nb_farm1970[did_sample[test2,]$D1979==1])),col="blue",alpha=0.4)
+#
+dgplot <- as.data.frame(cbind(c(log(did_sample[test1,]$sau1955[did_sample[test1,]$D1970==1]),log(did_sample[test2,]$sau1955[did_sample[test2,]$D1979==1])),c(rep(1,sum(did_sample[test1,]$D1970)),rep(2,sum(did_sample[test2,]$D1979)))))
+names(dgplot) <- c("sau1955","sample")
+g3 <- ggplot(data=dgplot,aes(x=sau1955, fill=as.factor(sample))) + geom_histogram(binwidth=0.5, alpha=0.2) + scale_fill_manual(name="Samples",values=c("red","blue"),labels=c("Sample 1", "Sample 2")) + xlab("Log(Usable Farm Land in 1955)") + ylab("Count") + xlim(0,10) + geom_vline(xintercept = mean(log(did_sample[test1,]$sau1955[did_sample[test1,]$D1970==1])),col="red",alpha=0.4) + geom_vline(xintercept = mean(log(did_sample[test2,]$sau1955[did_sample[test2,]$D1979==1])),col="blue",alpha=0.4)
+#
+dgplot <- as.data.frame(cbind(c(log(did_sample[test1,]$sau1970[did_sample[test1,]$D1970==1]),log(did_sample[test2,]$sau1970[did_sample[test2,]$D1979==1])),c(rep(1,sum(did_sample[test1,]$D1970)),rep(2,sum(did_sample[test2,]$D1979)))))
+names(dgplot) <- c("sau1970","sample")
+g4 <- ggplot(data=dgplot,aes(x=sau1970, fill=as.factor(sample))) + geom_histogram(binwidth=0.5, alpha=0.2) + scale_fill_manual(name="Samples",values=c("red","blue"),labels=c("Sample 1", "Sample 2")) + xlab("Log(Usable Farm Land in 1970)") + ylab("Count") + xlim(0,10) + geom_vline(xintercept = mean(log(did_sample[test1,]$sau1970[did_sample[test1,]$D1970==1])),col="red",alpha=0.4) + geom_vline(xintercept = mean(log(did_sample[test2,]$sau1970[did_sample[test2,]$D1979==1])),col="blue",alpha=0.4)
+#
+dgplot <- as.data.frame(cbind(c(did_sample[test1,]$handicap_total[did_sample[test1,]$D1970==1],did_sample[test2,]$handicap_total[did_sample[test2,]$D1979==1]),c(rep(1,sum(did_sample[test1,]$D1970)),rep(2,sum(did_sample[test2,]$D1979)))))
+names(dgplot) <- c("handicap_total","sample")
+g5 <- ggplot(data=dgplot,aes(x=handicap_total, fill=as.factor(sample))) + geom_histogram(binwidth=1, alpha=0.2) + scale_fill_manual(name="Samples",values=c("red","blue"),labels=c("Sample 1", "Sample 2")) + xlab("NHI") + ylab("Count") + geom_vline(xintercept = mean(did_sample[test1,]$handicap_total[did_sample[test1,]$D1970==1]),col="red",alpha=0.4) + geom_vline(xintercept = mean(did_sample[test2,]$handicap_total[did_sample[test2,]$D1979==1]),col="blue", alpha=0.4)
+#
+grid.arrange(g1,g2,g3,g4,g5, ncol=2,nrow=3)
+rm(dgplot,g1,g2,g3,g4,g5)
+@
+%
+An alternative formulation to the current DID analysis is to use multiple dates in the same regression and to assume a parallel trend in annual rate of change, that is to account for time distances between observation dates. For this purpose, I use the pooled OLS instead of individual fixed-effect model. The regression model is as follow:
+$$Y_{i} = \alpha + \delta t_{i} + \gamma D_{i} + \beta t_{i} D_{i} + U_{i}$$
+The coefficients $\beta$ estimates the treatment effects for each dummy group. Adjusting for time distances here means that variable $t$ of outcomes in 1955 takes value 0, 15 in 1970, and 24 in 1979. \\
+The results are presented in table \ref{tab:adjusted_did}. The dummy variables represent the group that were treated before the corresponding year. D1970 means that this group received treatment before 1970 (Sample 1). Similarly, D1979 means that this group received treatment before 1979 but after 1970 (Sample 2). In addition, a third group consisting of 14 communes added after 1979 but before 1988 is included to test for the annual rate of change assumption mentioned above. This group's sample size is very small, hence, the result is indicative in limited sense. If data in 1988 is included, the magnitude of coefficients changes, which is understandable because we have to extend the assumption until 1988. But it is assuring to see that the signs and the significance of each regressor stay the same. \\
+The table tells us that on average, the treatment group's number of farms goes down 1.1\% more for sample 1 and 0.7\% more for sample 2 compared to control group while the result for third group indicates that there is no structural difference between this group and the control. However, the decline is likely to be driven by the big decrease between 1955 and 1970. For usable farm land, treated communes would suffer 3.7\% faster decrease without the program while with the subsidy, the gap was now 1.1\% for sample 1 and 1.3\% for sample 2. Again, the indication of the third group is limited due to its small size.
+<<onesample,eval=FALSE,echo=FALSE,results='hide'>>=
+# Not using data in 1988
+adjusted_did_fd2 <- function(out0,out1,out2,D1,D2,D3){
+  y <- c(out0,out1,out2)
+  t <- c(rep(0,length(out0)),rep(15,length(out1)),rep(24,length(out2)))
+  D1970 <- rep(D1,3)
+  D1979 <- rep(D2,3)
+  D1988 <- rep(D3,3)
+  t.D1970 <- t*D1970
+  t.D1979 <- t*D1979
+  t.D1988 <- t*D1988
+  # data_fe <- cbind(c(seq(1,length(y))),t,y,t.D1,t.D2,t.D3)
+  # data_fe <- as.data.frame(data_fe)
+  # names(data_fe) <- c("Individual","time","y","t.D1","t.D2","t.D3")
+  # DID_FE <- plm(y ~ time + t.D1 + t.D2 + t.D3, data = data_fe, index = c("Individual", "time"), model = "within")
+  fd_reg <- lm(y ~ t + D1970 + D1979 + D1988 + t.D1970 + t.D1979 + t.D1988)
+  return(fd_reg)
+}
+
+adjusted_nb <- adjusted_did_fd(log(did_sample$nb_farm1955),log(did_sample$nb_farm1970),log(did_sample$nb_farm1979),did_sample$D1970,did_sample$D1979,did_sample$D1988)
+
+adjusted_sau <-adjusted_did_fd(log(did_sample$sau1955),log(did_sample$sau1970),log(did_sample$sau1979),did_sample$D1970,did_sample$D1979,did_sample$D1988)
+
+stargazer(adjusted_nb, adjusted_sau, title="DID adjusted for time distance", align=TRUE)
+
+# Use data in 1988 as well
+adjusted_did_fd2 <- function(out0,out1,out2,out3,D1,D2,D3){
+  y <- c(out0,out1,out2,out3)
+  t <- c(rep(0,length(out0)),rep(15,length(out1)),rep(24,length(out2)),rep(33,length(out3)))
+  D1970 <- rep(D1,4)
+  D1979 <- rep(D2,4)
+  D1988 <- rep(D3,4)
+  t.D1970 <- t*D1970
+  t.D1979 <- t*D1979
+  t.D1988 <- t*D1988
+  # data_fe <- cbind(c(seq(1,length(y))),t,y,t.D1,t.D2,t.D3)
+  # data_fe <- as.data.frame(data_fe)
+  # names(data_fe) <- c("Individual","time","y","t.D1","t.D2","t.D3")
+  # DID_FE <- plm(y ~ time + t.D1 + t.D2 + t.D3, data = data_fe, index = c("Individual", "time"), model = "within")
+  fd_reg <- lm(y ~ t + D1970 + D1979 + D1988 + t.D1970 + t.D1979 + t.D1988)
+  return(fd_reg)
+}
+adjusted_nb2 <- adjusted_did_fd2(log(did_sample$nb_farm1955),log(did_sample$nb_farm1970),log(did_sample$nb_farm1979),log(did_sample$nb_farm1988),did_sample$D1970,did_sample$D1979,did_sample$D1988)
+
+adjusted_sau2 <-adjusted_did_fd2(log(did_sample$sau1955),log(did_sample$sau1970),log(did_sample$sau1979),log(did_sample$sau1988),did_sample$D1970,did_sample$D1979,did_sample$D1988)
+
+stargazer(adjusted_nb2, adjusted_sau2, title="DID adjusted for time distance", align=TRUE)
+
+# use data up to 2010
+adjusted_did_fd3 <- function(out0,out1,out2,out3,out4,out5,D1,D2,D3){
+  y <- c(out0,out1,out2,out3,out4,out5)
+  t <- c(rep(0,length(out0)),rep(15,length(out1)),rep(24,length(out2)),rep(33,length(out3)),rep(45,length(out4)),rep(55,length(out5)))
+  D1970 <- rep(D1,6)
+  D1979 <- rep(D2,6)
+  D1988 <- rep(D3,6)
+  t.D1970 <- t*D1970
+  t.D1979 <- t*D1979
+  t.D1988 <- t*D1988
+  # data_fe <- cbind(c(seq(1,length(y))),t,y,t.D1,t.D2,t.D3)
+  # data_fe <- as.data.frame(data_fe)
+  # names(data_fe) <- c("Individual","time","y","t.D1","t.D2","t.D3")
+  # DID_FE <- plm(y ~ time + t.D1 + t.D2 + t.D3, data = data_fe, index = c("Individual", "time"), model = "within")
+  fd_reg <- lm(y ~ t + D1970 + D1979 + D1988 + t.D1970 + t.D1979 + t.D1988)
+  return(fd_reg)
+}
+
+adjusted_nb3 <- adjusted_did_fd3(log(did_sample$nb_farm1955),log(did_sample$nb_farm1970),log(did_sample$nb_farm1979),log(did_sample$nb_farm1988),log(did_sample$nb_farm2000),log(did_sample$nb_farm2010),did_sample$D1970,did_sample$D1979,did_sample$D1988)
+
+adjusted_sau3 <- adjusted_did_fd3(log(did_sample$sau1955),log(did_sample$sau1970),log(did_sample$sau1979),log(did_sample$sau1988),log(did_sample$sau2000),log(did_sample$sau2010),did_sample$D1970,did_sample$D1979,did_sample$D1988)
+
+stargazer(adjusted_nb3, adjusted_sau3, title="DID adjusted for time distance", align=TRUE)
+@
+\clearpage
+% Table created by stargazer v.5.2 by Marek Hlavac, Harvard University. E-mail: hlavac at fas.harvard.edu
+% Date and time: Sat, Jun 03, 2017 - 3:43:48 AM
+% Requires LaTeX packages: dcolumn 
+\begin{table}[!htbp] \centering 
+  \caption{DID adjusted for time distance} 
+  \label{tab:adjusted_did} 
+\resizebox{\columnwidth}{!}{%
+\bgroup
+\def\arraystretch{1.2}
+\begin{tabular}{@{\extracolsep{4pt}}lD{.}{.}{-3} D{.}{.}{-3} } 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{2}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-3} 
+\\[-1.8ex] & \multicolumn{1}{c}{Log (Number of Farms)} & \multicolumn{1}{c}{Log (Usable Farm Land)}\\ 
+\\[-1.8ex] & \multicolumn{1}{c}{(1)} & \multicolumn{1}{c}{(2)}\\ 
+\hline \\[-1.8ex] 
+ t & -0.024^{***} & -0.004^{***} \\ 
+		& (0.0003) & (0.0003) \\ 
+		& & \\ 
+		D1970 & 0.227^{***} & -0.004 \\ 
+		& (0.017) & (0.015) \\ 
+		& & \\ 
+		D1979 & 0.230^{***} & -0.235^{***} \\ 
+		& (0.030) & (0.027) \\ 
+		& & \\ 
+		D1988 & 0.012 & -0.810^{***} \\ 
+		& (0.225) & (0.202) \\ 
+		& & \\ 
+		t.D1970 & -0.011^{***} & -0.011^{***} \\ 
+		& (0.001) & (0.001) \\ 
+		& & \\ 
+		t.D1979 & -0.007^{***} & -0.013^{***} \\ 
+		& (0.002) & (0.002) \\ 
+		& & \\ 
+		t.D1988 & -0.013 & -0.037^{***} \\ 
+		& (0.014) & (0.012) \\ 
+		& & \\ 
+		Constant & 3.826^{***} & 6.623^{***} \\ 
+		& (0.005) & (0.005) \\ 
+		& & \\ 
+		\hline \\[-1.8ex] 
+		Observations & \multicolumn{1}{c}{82,353} & \multicolumn{1}{c}{82,353} \\ 
+		R$^{2}$ & \multicolumn{1}{c}{0.076} & \multicolumn{1}{c}{0.018} \\ 
+		Adjusted R$^{2}$ & \multicolumn{1}{c}{0.075} & \multicolumn{1}{c}{0.018} \\ 
+		Residual Std. Error (df = 82345) & \multicolumn{1}{c}{0.883} & \multicolumn{1}{c}{0.792} \\ 
+		F Statistic (df = 7; 82345) & \multicolumn{1}{c}{961.701$^{***}$} & \multicolumn{1}{c}{219.796$^{***}$} \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{2}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\egroup
+}
+\end{table} 
+%
+% \textcolor{red}{The decrease in number of farms and farm land reflects the consolidation and intensification trend in agriculture.} \textbf{cite studies} \\
+%
+\clearpage
+\section{Environmental Impacts} \label{sec:environment}
+%
+Similar to previous section, the Difference-in-Difference strategy can be applied to identify the changes in farming practice following the major changes of the program in 2000. Because herding is the main farming activity in the treated regions, livestock density or the number of livestock unit (LSU) per hectare of usable farm land can be used as a proxy for farming practice (LSU is used for aggregating livestock from various species and ages, and computed using a conventional set of coefficients). A decrease in livestock density would signal positive environmental effects. However, as mentioned before, since 2000, the payment has been determined on per hectare basis (decoupled payment), farmers' decisions are now driven by market factors. Therefore, we cannot separate changes in livestock density (if any) into component due to the movements in market and one due to the fact that sustainable farming method has become one eligibility condition. One more caution is related to the control group. Because farms in regions not subject to natural disadvantages have the possibility to diversify their production in livestock and various crops, shifts in livestock density reflects both movements in market for livestock as well as market for crops or any other alternative use of farm land. In summary, the analysis in this section serves only as a preliminary analysis and it should be accompanied by further evidence on water and soil quality which will become available in July 2017. \\
+Another possible issue is adverse selection. Similar programs, including those with clearly defined requirements, often encounter this problem in which only units who already satisfy the eligibility conditions choose to participate. As a result, they end up incurring costs without any intended benefits. For ICHN, it is less severe because almost all communes have taken part in the program before the changes in 2000. If there is adverse selection, it can only occur in declaration step for farms with more than 50 hectares of farm land. Rather, monitoring and inspection are the main concerns.
+%\cite{quillerou2011farmer}.
+<<cheptel_per_ha,eval=TRUE,echo=FALSE,warning=FALSE,message=FALSE,results='hide'>>=
+dataset_full$live_dens1988 <- dataset_full$cheptel1988 / dataset_full$sau1988
+dataset_full$live_dens2000 <- dataset_full$cheptel2000 / dataset_full$sau2000
+dataset_full$live_dens2010 <- dataset_full$cheptel2010 / dataset_full$sau2010
+
+# Graph data
+test <- dataset_full$montagne_dummy_2012
+live_graph <- matrix(0,ncol = 3, nrow = 3)
+live_graph[1,2] <- round(mean(dataset_full$live_dens1988[test==0]),2)
+live_graph[2,2] <- round(mean(dataset_full$live_dens2000[test==0]),2)
+live_graph[3,2] <- round(mean(dataset_full$live_dens2010[test==0]),2)
+
+live_graph[1,3] <- round(mean(dataset_full$live_dens1988[test==1]),2)
+live_graph[2,3] <- round(mean(dataset_full$live_dens2000[test==1]),2)
+live_graph[3,3] <- round(mean(dataset_full$live_dens2010[test==1]),2)
+
+live_graph[,1] <- c("1988","2000","2010")
+live_graph <- as.data.frame(live_graph)
+names(live_graph) <- c("Year","LD - Control","LD - Treatment")
+
+data_plot3 <- melt(live_graph, id.vars="Year")
+
+did_live1 <- did_fe(dataset_full$live_dens1988,dataset_full$live_dens2000,dataset_full$montagne_dummy_2002)
+# summary(did_live1)
+did_live2 <- did_fe(dataset_full$live_dens2000,dataset_full$live_dens2010,dataset_full$montagne_dummy_2012)
+# summary(did_live2)
+
+# robust.se1 <- sqrt(diag(vcovHC(did_live1,type = "HC1"))[2])
+# robust.se2 <- sqrt(diag(vcovHC(did_live2,type = "HC1"))[2])
+# stargazer(did_live1, did_live2, title="Livestock density regression results", align = TRUE)
+@
+%
+<<livestock,eval=TRUE,echo=FALSE,results='hide',fig.cap='Livestock density (LSU per hectare) before and after 2000',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth', out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+ggplot(data=data_plot3, aes(x=as.factor(Year), y=value, col=variable,group= variable)) + geom_point(na.rm=TRUE) + geom_line(na.rm=TRUE) + xlab("Year") + ylab("Livestock Density (LD)") + theme(legend.position="top",legend.title = element_blank())
+@
+% \begin{figure}[!htbp]
+%   \includegraphics{livestock_density.png}
+%   \caption{Livestock density (LSU per hectare) before and after 2000}
+%   \label{fig:livestock2}
+% \end{figure}
+Figure \ref{fig:livestock} shows the trends in livestock density in control and treatment groups. The data for the year 2000 is considered before the changes as they were implemented since 2001. Table \ref{tab:livestock} shows the regression results using fixed effect model similar to previous analysis. Again, column 1 acts as a placebo test which concludes that the parallel trend assumption does not hold. In fact, the livestock density in treated group declines less than that of the control group between 1988 and 2000. After the reform, the treated communes' livestock density  stays nearly the same while for control group, it continues the downward trend. All results are significant even though for column 1, the differential estimation is quite noisy. If we can make sure that the concerns raised above are negligible, then the reform in fact induced more intensive farming. \\
+A possible explanation for this can be the limit of support up to 50 hectares. Due to this limit, farmers, especially when facing unfavorable market situations such as decreasing price for livestock, have to increase livestock density to ensure a certain level of income. Another explanation, working in the opposite direction, is the changes in consumer preferences for food made locally and in an organic or an environmentally friendly manner. These changes are likely to place a higher pressure on demand for food produced by farms in the treatment group. The latter is equally probable given European Union's effort in promoting local brand names for agricultural products recently. \\
+Whether the livestock density exceeds the standard set by ICHN is difficult to verify because the official upper bound for livestock density is determined locally by DDAF (Departmental Agriculture and Forest Management) in each department. Nevertheless, regardless of what actually happened that can explain what we have seen, this result underlines the importance of monitoring and transparency in setting environmental objectives for such a policy. It is more true in the context of needed reforms to put ICHN into the "green box" category for agricultural policies within WTO negotiations.
+% Table created by stargazer v.5.2 by Marek Hlavac, Harvard University. E-mail: hlavac at fas.harvard.edu
+% Date and time: Sat, May 20, 2017 - 1:32:05 AM
+% Requires LaTeX packages: dcolumn 
+\begin{table}[!htbp] \centering 
+  \caption{Livestock density regression results} 
+  \label{tab:livestock} 
+\begin{tabular}{@{\extracolsep{5pt}}lD{.}{.}{-3} D{.}{.}{-3} } 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{2}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-3} 
+\\[-1.8ex] & \multicolumn{2}{c}{Livestock density} \\ 
+\\[-1.8ex] & \multicolumn{1}{c}{Between 1988 and 2000} & \multicolumn{1}{c}{Between 2000 and 2010}\\ 
+\hline \\[-1.8ex] 
+ $\delta_{1} - \delta_{0}$ & -0.031^{***} & -0.042^{***} \\ 
+  & (0.003) & (0.004) \\ 
+  & & \\ 
+ t*D & 0.017^{**} & 0.043^{***} \\ 
+  & (0.008) & (0.009) \\ 
+  & & \\ 
+\hline \\[-1.8ex] 
+Observations & \multicolumn{1}{c}{55,856} & \multicolumn{1}{c}{55,856} \\ 
+R$^{2}$ & \multicolumn{1}{c}{0.004} & \multicolumn{1}{c}{0.005} \\ 
+Adjusted R$^{2}$ & \multicolumn{1}{c}{-0.993} & \multicolumn{1}{c}{-0.990} \\ 
+F Statistic (df = 2; 27926) & \multicolumn{1}{c}{52.010$^{***}$} & \multicolumn{1}{c}{72.770$^{***}$} \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{2}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular} 
+\end{table}
+
+
+%%%%%%%%%%%%%%%% Conclusions %%%%%%%%%%%%%%%
+\section{Conclusions} \label{sec:conclude}
+%
+Given the original objectives set out by French government, the ICHN program is proved effective in slowing down the diminish in agricultural activities, and possibly the depopulation trend, in remote areas during the 1960s and 1970s. In current context where environment protection rises to become the primary objective of agricultural subsidies, however, this program actually causes a more intensive farming pratice after its reforms in 2000. It emphasizes the need to exert effort to make sure that environmental criteria are well designed, transparent and carefully monitored. More broadly speaking, the assumptions about the plausibility of this kind of programs are subject to controversial debates concerning regional economic development policies and land use. This calls for the examination of these assumptions and for a solution tailored to specific local conditions. \\
+Regarding methodologies, the advantages of natural experiments as identification strategy in public policy evaluation are widely accepted. Such a setting as that of the ICHN program with clearly stated eligibility conditions is ideal for the application of Regression Discontinuity design. However, as we have seen so far, there is a long way between program design and implementation and the discrepancy between the two has been the cause for the failure of RD design in this case. \\
+Due to constraints in time and data, the current analysis in this paper would very much benefit from further extensions. For economic analysis, the data on agricultural yield and farmers' income are desirable to put the changes in farm structure, farm size and usable farm land into a bigger picture. Relating to the environment, the evidence on the livestock density is only an intermediate result. A more direct indicator such as water, soil quality, forest coverage or biodiversity richness would provide a stronger ground for possible policy reform implications.
+
+\newpage
+\printbibliography
+
+\newpage
+\begin{appendices}
+%
+\section{Cutoff value estimation} \label{app:cutoff_estimation}
+%
+<<cutoff_estimate,eval=TRUE,echo=FALSE,results='hide',message=FALSE,warning=FALSE,cache=TRUE>>=
+############# Threshold estimation #################
+# Jack Porter and Ping Yu (2015)
+# alpha.hat = m+(pi) - m_(pi) and beta.hat = propensity score at pi.
+# Data of 1970 (dummy 1974) is used.
+# Consider only candidates in [1.6, 2.2]
+
+lpe <- function(y,c,sample_x,bw,kernel,p){
+  if (kernel=='uniform'){
+    K <- function(u){
+      K.u <- 0
+      if (abs(u)<=.5){K.u <- 1}
+      return(K.u)
+    }
+  }
+  if (kernel=='triangular'){
+    K <- function(u){
+      K.u <- 0
+      if (abs(u)<=.5){K.u <- 2*(1-2*abs(u))}
+      return(K.u)
+    }
+  }
+  if (kernel=='epanechnikov'){
+    K <- function(u){
+      K.u <- 0
+      if (abs(u)<=.5){K.u <- (3/2)*(1-4*u^2)}
+      return(K.u)
+    }
+  }
+  if (kernel=='quartic'){
+    K <- function(u){
+      K.u <- 0
+      if (abs(u)<=.5){K.u <- (15/8)*(1-4*u^2)^2}
+      return(K.u)
+    }
+  }
+  if (kernel=='gaussian'){
+    K <- function(u){
+      return(exp(-0.5*u^2)/(sqrt(2*pi)))
+    }
+  }
+  K.vec <- Vectorize(K)
+  
+  # Local polynomial Regression = Weighted Least Squares
+  x_dif <- sample_x - c
+  if(p==1){
+    a0 <- lm(y~x_dif, weights = K.vec((x_dif)/bw))
+  }
+  else if(p==2){
+    a0 <- lm(y~x_dif + x_dif^2, weights = K.vec((x_dif)/bw))
+  }
+  else if(p==3){
+    a0 <- lm(y~x_dif + x_dif^2 + x_dif^3, weights = K.vec((x_dif)/bw))
+  }
+  else{
+    a0 <- lm(y~x_dif + x_dif^2 + x_dif^3 + x_dif^4, weights = K.vec((x_dif)/bw))
+  }
+  
+  return(a0$coefficients[[1]])
+}
+
+cutoff_search <- function(c,running,outcome,dummy,kernel,p){
+  Z <- running >= c
+  if (p==1){
+    ps <- glm(dummy ~ Z + running, family = binomial(link = "logit"))  
+  }
+  else if (p==2){
+    ps <- glm(dummy ~ Z + running + I(running^2), family = binomial(link = "logit"))
+  }
+  else if (p==3){
+    ps <- glm(dummy ~ Z + running + I(running^2) + I(running^3), family = binomial(link = "logit"))
+  }
+  else {
+    ps <- glm(dummy ~ Z + running + I(running^2) + I(running^3) + I(running^4), family = binomial(link = "logit"))
+  }
+  bw <- IKbandwidth(running, outcome, cutpoint = c, verbose = FALSE, kernel = kernel)
+  alpha_c <- lpe(outcome[running<c],c,running[running<c],bw=bw,kernel=kernel,p=p) - lpe(outcome[running>=c],c,running[running>=c],bw=bw,kernel=kernel,p=p)
+  return(c(alpha_c, ps$coefficients[[2]],alpha_c + ps$coefficients[[2]]))
+}
+
+cutoff_grid <- seq(from = 0.5, to = 2.5, by = 0.1)
+# kernel_list <- c("gaussian","triangular","quartic","epanechnikov")
+
+## Number of farms in 1970 as the outcome variable; dataset_full
+cutoff_result_grid <- sapply(cutoff_grid,FUN = cutoff_search, running=dataset_full$handicap_total,outcome=dataset_full$nb_farm1970,dummy=dataset_full$montagne_dummy_1974, kernel='triangular',p=1)
+cutoff_result_grid <- cutoff_result_grid[3,cutoff_result_grid[2,]>=0]
+c_est <- cutoff_grid[1:length(cutoff_result_grid)][cutoff_result_grid==max(cutoff_result_grid)]
+
+## With different value of p
+# cutoff_result_grid2 <- sapply(cutoff_grid,FUN = cutoff_search, running=dataset_full$handicap_total,outcome=dataset_full$sau1970,dummy=dataset_full$montagne_dummy_1974, kernel='triangular',p=4)
+# cutoff_result_grid2 <- cutoff_result_grid2[3,cutoff_result_grid2[2,]>=0]
+# cutoff_grid[1:length(cutoff_result_grid2)][cutoff_result_grid2==max(cutoff_result_grid2)]
+
+## Usable land area (sau) in 1970 as the outcome variable; dataset_full
+cutoff_result_sau_grid <- sapply(cutoff_grid,FUN = cutoff_search, running=dataset_full$handicap_total,outcome=dataset_full$sau1970,dummy=dataset_full$montagne_dummy_1974, kernel='triangular',p=1)
+cutoff_result_sau_grid <- cutoff_result_sau_grid[3,cutoff_result_sau_grid[2,]>=0]
+c_est_sau <- cutoff_grid[1:length(cutoff_result_sau_grid)][cutoff_result_sau_grid==max(cutoff_result_sau_grid)]
+@
+%
+Due to the inconsistencies, I rely on the method proposed by \cite{porter2015regression} to estimate the threshold and use this estimate to proceed with several approaches for the RD design. The intuition behind this method is to look for the cutoff value which \textbf{maximizes the sum of jumps in the outcome variable and in the propensity score for the fuzzy RD design}. \textbf{The estimate is data driven}. \cite{porter2015regression} suggests using a nonparametric approach to estimate both the outcome and propensity score jumps at the would-be threshold. Here, I use the plug-in nonparametric approach by \cite{imbens2011optimal} with the default optimal bandwidth for outcome jump and a simple binomial logit model for the propensity score jump. If the cutoff exists, there must be a positive jump in the probability of receiving the treament (while the jump in outcome variable is not guaranteed) and therefore, I impose this as an additional requirement for the cutoff estimate, instead of focusing solely on the sum of the two jumps. \\
+For estimation, the outcome data for the year 1970 (with the corresponding treatment assignment of 1974), the earliest year in which the required data is available, is used. In addition, two outcome variables are considered: the number of farms in a commune and the usable farm land area. I find \Sexpr{c_est} for the former and \Sexpr{c_est_sau} for the latter. These estimates are similar to the visual detection by the histogram in figure \ref{fig:hist_nhi}. Figure \ref{fig:estimate_criterion} shows the changes in the total jumps for different trial values of the cutoff.
+\clearpage
+% However, the estimate is also sensitive to the step of the grid of trial values, which I suppose comes from the use of the simple binomial logit model. 
+%
+<<estimate_criterion,eval=TRUE,echo=FALSE,results='asis',fig.cap='Criteria for estimating cutoff value',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+par(mar=c(5.1,5.6,4.1,4.1))
+# par(cex.axis = 2, cex.main = 2, cex.lab = 2.5)
+# par(mfrow=c(2,1))
+plot(cutoff_grid[1:length(cutoff_result_grid)],cutoff_result_grid,type="l", col="red", xlab="Cutoff",ylab="Criterion, number of farms")
+abline(v=c_est,col="red",lty=1)
+par(new=TRUE)
+plot(cutoff_grid[1:length(cutoff_result_sau_grid)],cutoff_result_sau_grid,type="l", col="blue", xaxt="n",yaxt="n", xlab="",ylab="")
+abline(v=c_est_sau,col="blue",lty=1)
+axis(4)
+mtext("Criterion, usable farm land",side=4,line=3)
+legend("topleft",legend=c("NoF","UFL"),col=c("red","blue"),lty=1,bty="n")
+# dev.off()
+@
+%
+\section{DID in Level form} \label{app:did_level}
+<<DID_estimate,eval=FALSE,echo=FALSE,results='hide'>>=
+#### Sample 1
+test <- did_sample$D1970==1 | did_sample$D2012==0
+did_s11 <- did_fe(did_sample[test,]$nb_farm1955,did_sample[test,]$nb_farm1970,did_sample[test,]$D1970)
+# summary(did_s11)
+did_s12 <- did_fe(did_sample[test,]$nb_farm1970,did_sample[test,]$nb_farm1979,did_sample[test,]$D1970)
+# summary(did_s12)
+did_sau_s11 <- did_fe(did_sample[test,]$sau1955,did_sample[test,]$sau1970,did_sample[test,]$D1970)
+did_sau_s12 <- did_fe(did_sample[test,]$sau1970,did_sample[test,]$sau1979,did_sample[test,]$D1970)
+
+#### Sample 2
+test <- did_sample$D1979==1 | did_sample$D2012==0
+did_s21 <- did_fe(did_sample[test,]$nb_farm1955,did_sample[test,]$nb_farm1970,did_sample[test,]$D1979)
+# summary(did_s21)
+did_s22 <- did_fe(did_sample[test,]$nb_farm1970,did_sample[test,]$nb_farm1979,did_sample[test,]$D1979)
+# summary(did_s22)
+did_sau_s21 <- did_fe(did_sample[test,]$sau1955,did_sample[test,]$sau1970,did_sample[test,]$D1979)
+did_sau_s22 <- did_fe(did_sample[test,]$sau1970,did_sample[test,]$sau1979,did_sample[test,]$D1979)
+
+#### Sample 3
+did_s31 <- did_fe(sample3$nb_farm1955,sample3$nb_farm1970,sample3$montagne_dummy_1974)
+did_s32 <- did_fe(sample3$nb_farm1970,sample3$nb_farm1979,sample3$montagne_dummy_1974)
+
+did_sau_s31 <- did_fe(sample3$sau1955,sample3$sau1970,sample3$montagne_dummy_1974)
+did_sau_s32 <- did_fe(sample3$sau1970,sample3$sau1979,sample3$montagne_dummy_1974)
+
+# stargazer(did_s11,did_s12, did_s21, did_s22, did_s31, did_s32, title="DID Estimation Results - Number of farms",align=TRUE)
+# stargazer(did_sau_s11,did_sau_s12, did_sau_s21, did_sau_s22, did_sau_s31, did_sau_s32, title="DID Estimation Results - Usable Farm Land",align=TRUE)
+@
+%
+% <<did_nb,eval=FALSE,echo=FALSE,results='hide',fig.cap='Evolution of number of farms',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',fig.pos='!htbp'>>=
+% par(mfrow=c(1,1))
+% ggplot(data=data_plot[1:18,], aes(x=as.factor(Year), y=value, col=variable,group= variable)) + geom_point(na.rm=TRUE) + geom_line(na.rm=TRUE) + xlab("Year") + ylab("Number of farms")
+% @
+% %
+% <<did_sau,eval=FALSE,echo=FALSE,results='hide',fig.cap='Evolution of Usable Farm Land',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',fig.pos='!htbp'>>=
+% par(mfrow=c(1,1))
+% ggplot(data=data_plot[19:36,], aes(x=as.factor(Year), y=value, col=variable,group= variable)) + geom_point(na.rm=TRUE) + geom_line(na.rm=TRUE) + xlab("Year") + ylab("Usable Farm Land")
+% @
+%
+% Table created by stargazer v.5.2 by Marek Hlavac, Harvard University. E-mail: hlavac at fas.harvard.edu
+% Date and time: Sun, May 21, 2017 - 12:40:20 AM
+% Requires LaTeX packages: dcolumn 
+\begin{landscape}
+\begin{table}[!htbp] \centering 
+  \caption{DID Estimation Results - Level form} 
+  \label{tab:did_estimation}
+\resizebox{\columnwidth}{!}{%
+\bgroup
+\def\arraystretch{1.2}
+\begin{tabular}{@{\extracolsep{4pt}}lD{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} D{.}{.}{-3} } 
+\\[-1.8ex]\hline 
+\hline \\[-1.8ex] 
+ & \multicolumn{6}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-7} 
+\\[-1.8ex] & \multicolumn{6}{c}{Number of farms} \\ 
+\\[-1.8ex] & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1955 and 1970 \\ (1)}} & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1970 and 1979 \\ (2)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1955 and 1970 \\ (3)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1970 and 1979 \\ (4)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1955 and 1970 \\ (5)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1970 and 1979 \\ (6)}}\\ 
+\hline \\[-1.8ex] 
+ $\delta_{1} - \delta_{0}$ & -22.373^{***} & -9.646^{***} & -22.373^{***} & -9.646^{***} & -30.361^{***} & -9.455^{***} \\ 
+  & (0.248) & (0.090) & (0.252) & (0.092) & (1.493) & (0.406) \\ 
+  & & & & & & \\ 
+ t.D & -9.312^{***} & -0.100 & -7.988^{***} & 0.192 & -6.049^{**} & -1.402^{**} \\ 
+  & (0.778) & (0.283) & (1.380) & (0.505) & (2.587) & (0.704) \\ 
+  & & & & & & \\
+\hline \\[-1.8ex] 
+Observations & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{2,474} & \multicolumn{1}{c}{2,474} \\ 
+R$^{2}$ & \multicolumn{1}{c}{0.273} & \multicolumn{1}{c}{0.324} & \multicolumn{1}{c}{0.253} & \multicolumn{1}{c}{0.314} & \multicolumn{1}{c}{0.365} & \multicolumn{1}{c}{0.421} \\ 
+Adjusted R$^{2}$ & \multicolumn{1}{c}{-0.455} & \multicolumn{1}{c}{-0.353} & \multicolumn{1}{c}{-0.494} & \multicolumn{1}{c}{-0.373} & \multicolumn{1}{c}{-0.271} & \multicolumn{1}{c}{-0.159} \\ 
+F Statistic & \multicolumn{1}{c}{4,988.943$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{6,365.312$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{4,192.463$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{5,652.741$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{355.236$^{***}$ (df = 2; 1235)} & \multicolumn{1}{c}{448.921$^{***}$ (df = 2; 1235)} \\ 
+\hline 
+\hline \\[-1.8ex]
+ & \multicolumn{6}{c}{\textit{Dependent variable:}} \\ 
+\cline{2-7} 
+\\[-1.8ex] & \multicolumn{6}{c}{Usable Farm Land} \\ 
+\\[-1.8ex] & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1955 and 1970 \\ (1)}} & \multicolumn{1}{c}{\makecell{Sample 1 \\ 1970 and 1979 \\ (2)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1955 and 1970 \\ (3)}} & \multicolumn{1}{c}{\makecell{Sample 2 \\ 1970 and 1979 \\ (4)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1955 and 1970 \\ (5)}} & \multicolumn{1}{c}{\makecell{Sample 3 \\ 1970 and 1979 \\ (6)}}\\ 
+\hline \\[-1.8ex] 
+ $\delta_{1} - \delta_{0}$ & -78.084^{***} & -13.558^{***} & -78.084^{***} & -13.558^{***} & -230.105^{***} & -2.892 \\ 
+  & (2.878) & (0.860) & (2.819) & (0.795) & (14.175) & (5.242) \\ 
+  & & & & & & \\ 
+ t.D & -181.297^{***} & 30.806^{***} & -152.021^{***} & 10.666^{**} & -108.378^{***} & 20.746^{**} \\ 
+  & (9.028) & (2.696) & (15.436) & (4.356) & (24.561) & (9.083) \\ 
+  & & & & & & \\ 
+\hline \\[-1.8ex] 
+Observations & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{53,224} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{49,464} & \multicolumn{1}{c}{2,474} & \multicolumn{1}{c}{2,474} \\ 
+R$^{2}$ & \multicolumn{1}{c}{0.059} & \multicolumn{1}{c}{0.011} & \multicolumn{1}{c}{0.039} & \multicolumn{1}{c}{0.012} & \multicolumn{1}{c}{0.307} & \multicolumn{1}{c}{0.005} \\ 
+Adjusted R$^{2}$ & \multicolumn{1}{c}{-0.883} & \multicolumn{1}{c}{-0.978} & \multicolumn{1}{c}{-0.923} & \multicolumn{1}{c}{-0.977} & \multicolumn{1}{c}{-0.387} & \multicolumn{1}{c}{-0.993} \\ 
+F Statistic & \multicolumn{1}{c}{827.349$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{147.136$^{***}$ (df = 2; 26610)} & \multicolumn{1}{c}{498.497$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{145.475$^{***}$ (df = 2; 24730)} & \multicolumn{1}{c}{274.150$^{***}$ (df = 2; 1235)} & \multicolumn{1}{c}{3.049$^{**}$ (df = 2; 1235)} \\ 
+\hline 
+\hline \\[-1.8ex] 
+\textit{Note:}  & \multicolumn{6}{r}{$^{*}$p$<$0.1; $^{**}$p$<$0.05; $^{***}$p$<$0.01} \\ 
+\end{tabular}
+\egroup
+}
+\end{table}
+\end{landscape}
+%
+
+\section{RD design with cutoff 1.8} \label{app:rdd18}
+The procedure is exactly the same as in the main text, with the only modification is the new cutoff value of 1.8 instead of 2.0. This modification is to accommodate for the fact that some communes having NHI between 1.8 and 2.0 but enclaved by eligible communes are also eligible for the ICHN program. However, with this new cutoff, the estimation of intention-to-treat at the threshold is still very noise and insignificant.
+<<rdd_package_llr2,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+##### RDD estimation ########
+# Imbens-Kalyanaraman optimal bandwidth for LLR
+# This method selects the same bandwidth for both sides
+##### Bandwidth for nb_farmXXXX as outcome variable; kernel = triangular
+###### Year 1970 ######
+c <- 1.8
+rdmodel_nb_1970_18 <- RDestimate(log(nb_farm1970) ~ handicap_total + montagne_dummy_1974, data = dataset_full, kernel='triangular', cutpoint = c)
+rdmodel_sau_1970_18 <- RDestimate(log(sau1970) ~ handicap_total + montagne_dummy_1974, data = dataset_full, kernel='triangular', cutpoint = c)
+@
+%
+<<plugin_default2,eval=TRUE,echo=FALSE,results='asis',fig.lp='fig:',fig.cap='Plug-in nonparametric method with cutoff 1.8 (Number of farms as outcome)',fig.show='asis',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# png("plugin_nb.png", width = 640, height = 960)
+par(mar=c(5.1,5.6,4.1,3.1))
+# par(mfrow=c(3,1))
+#par(cex.axis = 2, cex.main = 2, cex.lab = 2.5)
+plot(rdmodel_nb_1970_18, which = 1, range = c(0,7), asp = 0.80)
+title(main = "", xlab = "NHI", ylab = "Log(Number of farms)")
+abline(v=c, col="red",lty=1)
+@
+%
+<<plugin_default_sau2,eval=TRUE,echo=FALSE,results='asis',fig.lp='fig:',fig.cap='Plug-in nonparametric method with cutoff 1.8 (Usable Farm Land as outcome)',fig.show='asis',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+### sau
+# png("plugin_sau.png", width = 640, height = 960)
+par(mar=c(5.1,5.6,4.1,3.1))
+# par(mfrow=c(3,1))
+#par(cex.axis = 2, cex.main = 2, cex.lab = 2.5)
+plot(rdmodel_sau_1970_18, which = 1, range = c(0,7), asp = 0.80)
+title(main = "", xlab = "NHI", ylab = "Log(Usable Farm Land)")
+abline(v=c, col="red",lty=1)
+@
+
+<<gcv2,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+# Generalized cross validation - Short cut formula
+c <- 1.8
+## Use only 50% of observations on each side
+test <- (dataset_full$handicap_total >= median(dataset_full$handicap_total[dataset_full$handicap_total < c])) & (dataset_full$handicap_total <= median(dataset_full$handicap_total[dataset_full$handicap_total >= c]))
+
+y <- log(dataset_full$nb_farm1970[test])
+z <- dataset_full$montagne_dummy_1974[test]
+x <- dataset_full$handicap_total[test]
+
+hmax <- 2*bw_nb_1970
+alphamat <- matrix(0,ncol=2,nrow=round(hmax/0.1,0))
+alphamat[,2] <-  seq(0.1,hmax,by=0.1)
+
+gcvs <- gcvplot(y[dataset_full$handicap_total <= c]~x[dataset_full$handicap_total <= c],alpha=alphamat,deg=1)
+gcv_nb_left <- gcvs$values
+bw_nb_1970_cv_left <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(y[dataset_full$handicap_total >= c]~x[dataset_full$handicap_total >= c],alpha=alphamat,deg=1)
+gcv_nb_right <- gcvs$values
+bw_nb_1970_cv_right <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(z[dataset_full$handicap_total <= c]~x[dataset_full$handicap_total <= c],alpha=alphamat,deg=1,family="binomial")
+gcv_ps_left <- gcvs$values
+bw_ps_1970_cv_left <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+
+gcvs <- gcvplot(z[dataset_full$handicap_total >= c]~x[dataset_full$handicap_total >= c],alpha=alphamat,deg=1,family="binomial")
+gcv_ps_right <- gcvs$values
+bw_ps_1970_cv_right <- max(gcvs$alpha[gcvs$values == min(gcvs$values),2])
+@
+
+<<LLR_given_CV2,eval=TRUE,echo=FALSE,results='hide',cache=TRUE>>=
+# Estimate for value around cutoff
+c <- 1.8
+rd_data <- dataset_full[,c("handicap_total","nb_farm1970","montagne_dummy_1974")]
+names(rd_data) <- c("X","y","D")
+rd_data$y <- log(rd_data$y)
+
+test <- abs(rd_data$X - c) <= 0.5
+y_fitted <- unlist(lapply(rd_data$X[test], ll, rd_data$y, rd_data$X, bw_nb_1970_cv_left, bw_nb_1970_cv_right, c))
+y_fitted <- matrix(y_fitted, ncol = 3, nrow = sum(test), byrow = TRUE)
+colnames(y_fitted) <- c("fit","lwr","upr")
+plot_data <- as.data.frame(cbind(rd_data[test,],y_fitted))
+# 
+# # Estimate for the cutoff only
+ps_right <- ll(c,rd_data$D[rd_data$X>=c],rd_data$X[rd_data$X>=c],bw_ps_1970_cv_right,bw_ps_1970_cv_left,c)
+ps_left <- ll(c,rd_data$D[rd_data$X<=c],rd_data$X[rd_data$X<=c],bw_ps_1970_cv_left,bw_ps_1970_cv_right,c)
+# 
+outcome_right <- ll(c,rd_data$y[rd_data$X>=c],rd_data$X[rd_data$X>=c],bw_nb_1970_cv_right,bw_nb_1970_cv_left,c)
+outcome_left <- ll(c,rd_data$y[rd_data$X<=c],rd_data$X[rd_data$X<=c],bw_nb_1970_cv_left,bw_nb_1970_cv_right,c)
+
+# outcome_right[1] - outcome_left[1] # Intention-to-treat
+# ps_right[1] - ps_left[1] # Change in propensity score
+@
+%
+<<LLR_cv_plot2,eval=TRUE,echo=FALSE,results='hide',warning=FALSE,message=FALSE,fig.cap='LLR with optimal bandwidths chosen by GCV',fig.lp='fig:',fig.align='center',out.width='0.90\\textwidth',out.height='0.60\\textwidth',fig.pos='!htbp'>>=
+# # Make a plot
+ggplot(plot_data, aes(x = X)) + geom_line(aes(y = fit, color = X > c)) + geom_line(aes(y=lwr, color = X > c), lty = 2) + geom_line(aes(y=upr, color = X > c), lty = 2) + geom_vline(xintercept = c) + xlab("NHI") + ylab("Log(Number of farms) in 1970")
+@
+
+
+\end{appendices}
+
+
+
+\end{document}
